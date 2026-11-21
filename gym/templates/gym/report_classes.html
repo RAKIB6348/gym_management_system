@@ -1,0 +1,27 @@
+{% extends 'gym/base.html' %}
+{% block title %}Class Performance Report | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Class Performance Report{% endblock %}
+{% block topbar_actions %}
+<a href="?{{ query_string }}{% if query_string %}&{% endif %}export=csv" class="btn btn-secondary">Export CSV</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Class Performance</h2><p class="card-subtitle">Session and enrollment metrics for {{ range_label }} ({{ start_date|date:"M d, Y" }} - {{ end_date|date:"M d, Y" }}).</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field"><label>Range</label><select name="range"><option value="today" {% if range_key == 'today' %}selected{% endif %}>Today</option><option value="this_week" {% if range_key == 'this_week' %}selected{% endif %}>This Week</option><option value="this_month" {% if range_key == 'this_month' %}selected{% endif %}>This Month</option><option value="this_year" {% if range_key == 'this_year' %}selected{% endif %}>This Year</option><option value="custom" {% if range_key == 'custom' %}selected{% endif %}>Custom</option></select></div>
+      <div class="field"><label>Start</label><input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}"></div>
+      <div class="field"><label>End</label><input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}"></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+  {% if rows %}
+  <div class="table-wrap"><table><thead><tr><th>Class</th><th>Trainer</th><th>Total Sessions</th><th>Upcoming</th><th>Completed</th><th>Total Enrollments</th><th>Capacity Utilization</th></tr></thead><tbody>
+    {% for r in rows %}
+    <tr><td><a class="table-link" href="{% url 'gym:class_detail' r.gym_class.pk %}">{{ r.gym_class.name }}</a></td><td>{{ r.gym_class.trainer.full_name }}</td><td>{{ r.total_sessions }}</td><td>{{ r.upcoming_sessions }}</td><td>{{ r.completed_sessions }}</td><td>{{ r.total_enrollments }}</td><td>{{ r.utilization|floatformat:1 }}%</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><p class="muted">No classes found.</p></div>{% endif %}
+</section>
+{% endblock %}

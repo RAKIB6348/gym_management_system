@@ -1,0 +1,27 @@
+{% extends 'gym/base.html' %}
+{% block title %}Trainer Performance Report | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Trainer Performance Report{% endblock %}
+{% block topbar_actions %}
+<a href="?{{ query_string }}{% if query_string %}&{% endif %}export=csv" class="btn btn-secondary">Export CSV</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Trainer Performance</h2><p class="card-subtitle">Assignment and class metrics for {{ range_label }} ({{ start_date|date:"M d, Y" }} - {{ end_date|date:"M d, Y" }}).</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field"><label>Range</label><select name="range"><option value="today" {% if range_key == 'today' %}selected{% endif %}>Today</option><option value="this_week" {% if range_key == 'this_week' %}selected{% endif %}>This Week</option><option value="this_month" {% if range_key == 'this_month' %}selected{% endif %}>This Month</option><option value="this_year" {% if range_key == 'this_year' %}selected{% endif %}>This Year</option><option value="custom" {% if range_key == 'custom' %}selected{% endif %}>Custom</option></select></div>
+      <div class="field"><label>Start</label><input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}"></div>
+      <div class="field"><label>End</label><input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}"></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+  {% if rows %}
+  <div class="table-wrap"><table><thead><tr><th>Trainer ID</th><th>Name</th><th>Specialization</th><th>Active Assigned Members</th><th>Total Assigned Members</th><th>Scheduled Classes</th><th>Completed Classes</th></tr></thead><tbody>
+    {% for r in rows %}
+    <tr><td>{{ r.trainer.trainer_id }}</td><td><a class="table-link" href="{% url 'gym:trainer_detail' r.trainer.pk %}">{{ r.trainer.full_name }}</a></td><td>{{ r.trainer.specialization }}</td><td>{{ r.active_assigned }}</td><td>{{ r.total_assigned }}</td><td>{{ r.scheduled_classes }}</td><td>{{ r.completed_classes }}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><p class="muted">No trainers found.</p></div>{% endif %}
+</section>
+{% endblock %}

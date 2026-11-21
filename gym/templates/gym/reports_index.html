@@ -1,0 +1,38 @@
+{% extends 'gym/base.html' %}
+{% block title %}Reports | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Reports & Analytics{% endblock %}
+{% block content %}
+<div class="plan-grid">
+  <article class="card plan-card">
+    <h3 class="plan-name">Payment Report</h3>
+    <p class="plan-description">Payment history, method/status filters, totals, and CSV export.</p>
+    <div class="plan-actions"><a href="{% url 'gym:report_payments' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+  <article class="card plan-card">
+    <h3 class="plan-name">Outstanding Dues</h3>
+    <p class="plan-description">Members with unpaid balances, due filters, and collect payment actions.</p>
+    <div class="plan-actions"><a href="{% url 'gym:report_outstanding_dues' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+  <article class="card plan-card">
+    <h3 class="plan-name">Membership Report</h3>
+    <p class="plan-description">Registrations, active/expired/upcoming memberships, renewals, expiring soon.</p>
+    <div class="plan-actions"><a href="{% url 'gym:report_membership' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+  <article class="card plan-card">
+    <h3 class="plan-name">Trainer Performance</h3>
+    <p class="plan-description">Assignments and scheduled/completed class counts by trainer.</p>
+    <div class="plan-actions"><a href="{% url 'gym:report_trainers' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+  <article class="card plan-card">
+    <h3 class="plan-name">Class Performance</h3>
+    <p class="plan-description">Sessions, enrollments, and capacity utilization by class.</p>
+    <div class="plan-actions"><a href="{% url 'gym:report_classes' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+  <article class="card plan-card">
+    <h3 class="plan-name">Business Dashboard</h3>
+    <p class="plan-description">KPI overview, financial charts, and quick business insights.</p>
+    <div class="plan-actions"><a href="{% url 'gym:business_dashboard' %}" class="btn btn-primary btn-sm">Open</a></div>
+  </article>
+</div>
+{% endblock %}

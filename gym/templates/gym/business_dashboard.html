@@ -1,0 +1,76 @@
+{% extends 'gym/base.html' %}
+{% block title %}Business Dashboard | Gym Management{% endblock %}
+{% block eyebrow %}Business Dashboard{% endblock %}
+{% block page_title %}Gym Business Dashboard{% endblock %}
+{% block topbar_actions %}
+<form method="get" class="filter-bar">
+  <div class="field"><label>Range</label><select name="range" onchange="this.form.submit()">
+    <option value="today" {% if range_key == 'today' %}selected{% endif %}>Today</option>
+    <option value="this_week" {% if range_key == 'this_week' %}selected{% endif %}>This Week</option>
+    <option value="this_month" {% if range_key == 'this_month' %}selected{% endif %}>This Month</option>
+    <option value="this_year" {% if range_key == 'this_year' %}selected{% endif %}>This Year</option>
+    <option value="custom" {% if range_key == 'custom' %}selected{% endif %}>Custom</option>
+  </select></div>
+  <div class="field"><label>Start</label><input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}"></div>
+  <div class="field"><label>End</label><input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}"></div>
+  <button type="submit" class="btn btn-secondary">Apply</button>
+  <a href="?range={{ range_key }}&start={{ start_date|date:'Y-m-d' }}&end={{ end_date|date:'Y-m-d' }}&export=csv" class="btn btn-secondary">Export Income CSV</a>
+</form>
+{% endblock %}
+{% block content %}
+<section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+  <a class="stat-card" href="{% url 'gym:member_list' %}"><div class="stat-label">Total Members</div><div class="stat-value">{{ total_members }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Current</div></a>
+  <a class="stat-card" href="{% url 'gym:subscription_list' %}?status=active"><div class="stat-label">Active Memberships</div><div class="stat-value success">{{ active_memberships }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Current</div></a>
+  <a class="stat-card" href="{% url 'gym:subscription_list' %}?status=expired"><div class="stat-label">Expired Memberships</div><div class="stat-value" style="color:#dc2626;">{{ expired_memberships }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Current</div></a>
+  <a class="stat-card" href="{% url 'gym:report_payments' %}?range={{ range_key }}&start={{ start_date|date:'Y-m-d' }}&end={{ end_date|date:'Y-m-d' }}&status=completed"><div class="stat-label">Total Collection</div><div class="stat-value">BDT {{ total_collection|floatformat:2 }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">{{ range_label }}</div></a>
+  <a class="stat-card" href="{% url 'gym:report_payments' %}?range=today&status=completed"><div class="stat-label">Today's Collection</div><div class="stat-value">BDT {{ today_collection|floatformat:2 }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Today</div></a>
+  <a class="stat-card" href="{% url 'gym:report_outstanding_dues' %}"><div class="stat-label">Outstanding Due</div><div class="stat-value" style="color:#dc2626;">BDT {{ outstanding_due|floatformat:2 }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Current</div></a>
+  <a class="stat-card" href="{% url 'gym:trainer_list' %}?status=active"><div class="stat-label">Active Trainers</div><div class="stat-value">{{ active_trainers }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Current</div></a>
+  <a class="stat-card" href="{% url 'gym:weekly_schedule' %}"><div class="stat-label">Upcoming Classes</div><div class="stat-value">{{ upcoming_classes }}</div><div class="muted" style="font-size:.78rem;margin-top:6px;">Scheduled sessions</div></a>
+</section>
+
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Monthly Income</h2><p class="card-subtitle">Completed payments in selected period (BDT). Not accounting profit.</p></div></div>
+    <div class="card-body"><canvas id="incomeChart" height="110"></canvas></div>
+  </section>
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Payment Method Breakdown</h2><p class="card-subtitle">Completed payments by method in selected period.</p></div></div>
+    <div class="card-body"><canvas id="methodChart" height="140"></canvas></div>
+  </section>
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Recent Payments</h2><p class="card-subtitle">Latest recorded payments.</p></div><a href="{% url 'gym:report_payments' %}" class="btn btn-secondary btn-sm">Payment Report</a></div>
+    {% if recent_payments %}
+    <div class="table-wrap"><table><thead><tr><th>Reference</th><th>Member</th><th>Date</th><th>Method</th><th>Amount</th><th>Status</th></tr></thead><tbody>
+      {% for p in recent_payments %}
+      <tr><td>{{ p.payment_reference }}</td><td><a class="table-link" href="{% url 'gym:member_detail' p.member.pk %}">{{ p.member.full_name }}</a></td><td>{{ p.payment_date|date:"M d, Y" }}</td><td>{{ p.get_payment_method_display }}</td><td>BDT {{ p.amount|floatformat:2 }}</td><td>{% if p.status == 'completed' %}<span class="badge badge-active">Completed</span>{% else %}<span class="badge badge-cancelled">Cancelled</span>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state"><p class="muted">No payments recorded yet.</p></div>{% endif %}
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const monthlyLabels = {{ monthly_labels_json|safe }};
+const monthlyValues = {{ monthly_values_json|safe }};
+const methodLabels = {{ method_labels_json|safe }};
+const methodValues = {{ method_values_json|safe }};
+new Chart(document.getElementById('incomeChart'), {
+  type: 'bar',
+  data: { labels: monthlyLabels, datasets: [{ label: 'Collection (BDT)', data: monthlyValues, backgroundColor: '#1d6fff', borderRadius: 6 }] },
+  options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+});
+new Chart(document.getElementById('methodChart'), {
+  type: 'doughnut',
+  data: { labels: methodLabels, datasets: [{ data: methodValues, backgroundColor: ['#1d6fff','#16a34a','#f59e0b','#7c3aed'] }] },
+  options: { responsive: true }
+});
+</script>
+<style>
+.stats-grid a.stat-card { color: inherit; text-decoration: none; display:block; }
+.stats-grid a.stat-card:hover { border-color:#93c5fd; }
+@media (max-width: 1100px) { .stats-grid[style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; } }
+@media (max-width: 640px) { .stats-grid[style*="repeat(4"] { grid-template-columns: 1fr !important; } }
+</style>
+{% endblock %}

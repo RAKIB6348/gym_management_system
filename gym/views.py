@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -19,6 +20,7 @@ from .forms import (
     TrainerForm, TrainerAssignmentForm, TrainerAvailabilityForm,
     GymClassForm, ClassScheduleForm, SessionGenerateForm,
 )
+from . import reporting
 from .models import (
     Member, MemberSubscription, MembershipPayment, MembershipPlan,
     Trainer, TrainerAssignment, TrainerAvailability,
@@ -1287,3 +1289,262 @@ class ClassDashboardView(LoginRequiredMixin, View):
             'today_sessions_count': today_sessions_count,
             'upcoming_sessions': upcoming_sessions,
         })
+
+
+# -------------------- Reports & Business Dashboard --------------------
+
+def _membership_status_counts(today=None):
+    today = today or timezone.localdate()
+    subs = MemberSubscription.objects.exclude(status=MemberSubscription.Status.CANCELLED)
+    active = subs.filter(start_date__lte=today, end_date__gte=today).count()
+    upcoming = subs.filter(start_date__gt=today).count()
+    expired = subs.filter(end_date__lt=today).count()
+    return {'active': active, 'upcoming': upcoming, 'expired': expired}
+
+
+class StaffRequiredMixin(UserPassesTestMixin):
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.is_superuser
+
+    def handle_no_permission(self):
+        if not self.request.user.is_authenticated:
+            return super().handle_no_permission()
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+
+
+class BusinessDashboardView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/business_dashboard.html'
+
+    def get(self, request):
+        today = timezone.localdate()
+        start_date, end_date, range_key, range_label = reporting.get_date_range(request)
+
+        total_members = Member.objects.count()
+        status_counts = _membership_status_counts(today)
+        total_collection = reporting.sum_completed(start_date, end_date)
+        today_collection = reporting.sum_completed(today, today)
+        outstanding_rows = reporting.outstanding_due_rows()
+        outstanding_due = sum((r['due_amount'] for r in outstanding_rows), Decimal('0.00'))
+        active_trainers = Trainer.objects.filter(status=Trainer.Status.ACTIVE).count()
+        upcoming_classes = ClassSession.objects.filter(status=ClassSession.Status.SCHEDULED, start_datetime__gte=timezone.now()).count()
+
+        # Charts
+        from django.db.models.functions import TruncMonth
+        monthly = (
+            reporting.completed_payments(start_date, end_date)
+            .annotate(month=TruncMonth('payment_date'))
+            .values('month').annotate(total=Coalesce(Sum('amount'), Decimal('0.00'))).order_by('month')
+        )
+        monthly_labels = [m['month'].strftime('%b %Y') for m in monthly if m['month']]
+        monthly_values = [float(m['total']) for m in monthly if m['month']]
+
+        method_breakdown = []
+        for value, label in MembershipPayment.PaymentMethod.choices:
+            agg = reporting.completed_payments(start_date, end_date).filter(payment_method=value).aggregate(
+                total=Coalesce(Sum('amount'), Decimal('0.00')), count=Count('id')
+            )
+            method_breakdown.append({'label': label, 'value': value, 'total': agg['total'] or Decimal('0.00'), 'count': agg['count']})
+
+        if request.GET.get('export') == 'csv':
+            rows = [['Period', f'{start_date} to {end_date}'], [], ['Month', 'Collection (BDT)']]
+            for label, val in zip(monthly_labels, monthly_values):
+                rows.append([label, f'{val:.2f}'])
+            rows += [[], ['Payment Method', 'Transactions', 'Total (BDT)']]
+            for m in method_breakdown:
+                rows.append([m['label'], m['count'], f"{m['total']:.2f}"])
+            return reporting.csv_response('income_report.csv', [], rows)
+
+        recent_payments = MembershipPayment.objects.select_related('member', 'subscription__plan', 'collected_by').order_by('-payment_date', '-created_at')[:8]
+
+        context = {
+            'range_key': range_key, 'range_label': range_label, 'start_date': start_date, 'end_date': end_date,
+            'total_members': total_members,
+            'active_memberships': status_counts['active'],
+            'expired_memberships': status_counts['expired'],
+            'total_collection': total_collection,
+            'today_collection': today_collection,
+            'outstanding_due': outstanding_due,
+            'active_trainers': active_trainers,
+            'upcoming_classes': upcoming_classes,
+            'monthly_labels_json': json.dumps(monthly_labels),
+            'monthly_values_json': json.dumps(monthly_values),
+            'method_breakdown': method_breakdown,
+            'method_labels_json': json.dumps([m['label'] for m in method_breakdown]),
+            'method_values_json': json.dumps([float(m['total']) for m in method_breakdown]),
+            'recent_payments': recent_payments,
+        }
+        return render(request, self.template_name, context)
+
+
+class ReportsIndexView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/reports_index.html'
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+
+class PaymentReportView(LoginRequiredMixin, StaffRequiredMixin, ListView):
+    model = MembershipPayment
+    template_name = 'gym/report_payments.html'
+    context_object_name = 'payments'
+    paginate_by = 20
+
+    def get_queryset(self):
+        qs = MembershipPayment.objects.select_related('member', 'subscription', 'subscription__plan', 'collected_by').all()
+        start_date, end_date, _, _ = reporting.get_date_range(self.request)
+        q = self.request.GET.get('q', '').strip()
+        method = self.request.GET.get('method', '').strip()
+        status = self.request.GET.get('status', '').strip()
+        if self.request.GET.get('range') or self.request.GET.get('start') or self.request.GET.get('end'):
+            qs = qs.filter(payment_date__gte=start_date, payment_date__lte=end_date)
+        if q:
+            qs = qs.filter(Q(member__full_name__icontains=q) | Q(member__member_id__icontains=q) | Q(payment_reference__icontains=q))
+        if method in {c for c, _ in MembershipPayment.PaymentMethod.choices}:
+            qs = qs.filter(payment_method=method)
+        if status in {c for c, _ in MembershipPayment.Status.choices}:
+            qs = qs.filter(status=status)
+        return qs.order_by('-payment_date', '-created_at')
+
+    def render_to_response(self, context, **response_kwargs):
+        if self.request.GET.get('export') == 'csv':
+            rows = []
+            for p in self.get_queryset():
+                rows.append([p.payment_reference, p.member.member_id, p.member.full_name, p.subscription.plan.name, p.payment_date, p.get_payment_method_display(), f'{p.amount:.2f}', p.get_status_display(), p.collected_by.get_full_name() or p.collected_by.username])
+            return reporting.csv_response('payment_report.csv', ['Payment Reference','Member ID','Member Name','Plan','Payment Date','Method','Amount','Status','Collected By'], rows)
+        return super().render_to_response(context, **response_kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        start_date, end_date, range_key, range_label = reporting.get_date_range(self.request)
+        context.update({'start_date': start_date, 'end_date': end_date, 'range_key': range_key, 'range_label': range_label})
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        context['method_filter'] = self.request.GET.get('method', '').strip()
+        context['status_filter'] = self.request.GET.get('status', '').strip()
+        context['method_choices'] = MembershipPayment.PaymentMethod.choices
+        context['status_choices'] = MembershipPayment.Status.choices
+        params = self.request.GET.copy(); params.pop('page', None); params.pop('export', None)
+        context['query_string'] = params.urlencode()
+        qs = self.get_queryset()
+        context['report_total'] = qs.filter(status=MembershipPayment.Status.COMPLETED).aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')))['total'] or Decimal('0.00')
+        return context
+
+
+class OutstandingDueReportView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/report_outstanding.html'
+
+    def get(self, request):
+        q = request.GET.get('q', '').strip()
+        plan = request.GET.get('plan', '').strip()
+        min_due = request.GET.get('min_due', '').strip()
+        rows = reporting.outstanding_due_rows()
+        if q:
+            ql = q.lower()
+            rows = [r for r in rows if ql in r['member'].full_name.lower() or ql in r['member'].member_id.lower()]
+        if plan:
+            rows = [r for r in rows if str(r['plan'].pk) == plan]
+        if min_due:
+            try:
+                md = Decimal(min_due)
+                rows = [r for r in rows if r['due_amount'] >= md]
+            except Exception:
+                pass
+        if request.GET.get('export') == 'csv':
+            data = [[r['member'].member_id, r['member'].full_name, r['plan'].name, f"{r['total_fee']:.2f}", f"{r['paid_amount']:.2f}", f"{r['due_amount']:.2f}", r['subscription_status'].title()] for r in rows]
+            return reporting.csv_response('outstanding_due_report.csv', ['Member ID','Member Name','Plan','Total Fee','Paid Amount','Due Amount','Subscription Status'], data)
+        total_due = sum((r['due_amount'] for r in rows), Decimal('0.00'))
+        return render(request, self.template_name, {
+            'rows': rows, 'total_due': total_due, 'search_query': q, 'plan_filter': plan, 'min_due': min_due,
+            'plans': MembershipPlan.objects.order_by('name'),
+            'query_string': request.GET.urlencode().replace('export=csv', '').strip('&'),
+        })
+
+
+class MembershipReportView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/report_membership.html'
+
+    def get(self, request):
+        today = timezone.localdate()
+        start_date, end_date, range_key, range_label = reporting.get_date_range(request)
+        expiry_days = request.GET.get('expiry_days', '').strip()
+
+        counts = _membership_status_counts(today)
+        total_registered = Member.objects.count()
+        new_registrations = Member.objects.filter(joining_date__gte=start_date, joining_date__lte=end_date).count()
+        period_subs = MemberSubscription.objects.filter(start_date__gte=start_date, start_date__lte=end_date)
+        renewals = 0
+        for sub in period_subs.only('id', 'member_id', 'start_date'):
+            if MemberSubscription.objects.filter(member_id=sub.member_id, start_date__lt=sub.start_date).exists():
+                renewals += 1
+
+        # Expiring soon
+        expiring_qs = MemberSubscription.objects.select_related('member', 'plan').exclude(status=MemberSubscription.Status.CANCELLED).filter(end_date__gte=today)
+        if expiry_days in {'7','15','30'}:
+            expiring_qs = expiring_qs.filter(end_date__lte=today + timedelta(days=int(expiry_days)))
+        else:
+            expiring_qs = expiring_qs.filter(end_date__lte=today + timedelta(days=30))
+            expiry_days = '30'
+        expiring_rows = []
+        for s in expiring_qs.order_by('end_date'):
+            st = s.current_status(today=today)
+            if st in {MemberSubscription.Status.ACTIVE, MemberSubscription.Status.UPCOMING}:
+                expiring_rows.append(s)
+
+        # New registrations list
+        new_members = Member.objects.filter(joining_date__gte=start_date, joining_date__lte=end_date).order_by('-joining_date')[:50]
+
+        if request.GET.get('export') == 'csv':
+            data = [[m.member_id, m.full_name, m.mobile_number, m.joining_date, m.get_status_display()] for m in Member.objects.filter(joining_date__gte=start_date, joining_date__lte=end_date).order_by('-joining_date')]
+            return reporting.csv_response('membership_report.csv', ['Member ID','Name','Phone','Joining Date','Profile Status'], data)
+
+        return render(request, self.template_name, {
+            'start_date': start_date, 'end_date': end_date, 'range_key': range_key, 'range_label': range_label,
+            'total_registered': total_registered,
+            'active_memberships': counts['active'], 'expired_memberships': counts['expired'], 'upcoming_memberships': counts['upcoming'],
+            'new_registrations': new_registrations, 'renewals': renewals,
+            'expiry_days': expiry_days, 'expiring_rows': expiring_rows, 'new_members': new_members,
+            'query_string': request.GET.urlencode().replace('export=csv', '').strip('&'),
+        })
+
+
+class TrainerPerformanceReportView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/report_trainers.html'
+
+    def get(self, request):
+        start_date, end_date, range_key, range_label = reporting.get_date_range(request)
+        trainers = Trainer.objects.all().order_by('full_name')
+        rows = []
+        for t in trainers:
+            active_assigned = TrainerAssignment.objects.filter(trainer=t, status=TrainerAssignment.Status.ACTIVE).values('member').distinct().count()
+            total_assigned = TrainerAssignment.objects.filter(trainer=t).values('member').distinct().count()
+            scheduled_classes = ClassSession.objects.filter(trainer=t, start_datetime__date__gte=start_date, start_datetime__date__lte=end_date).count()
+            completed_classes = ClassSession.objects.filter(trainer=t, status=ClassSession.Status.COMPLETED, start_datetime__date__gte=start_date, start_datetime__date__lte=end_date).count()
+            rows.append({'trainer': t, 'active_assigned': active_assigned, 'total_assigned': total_assigned, 'scheduled_classes': scheduled_classes, 'completed_classes': completed_classes})
+        if request.GET.get('export') == 'csv':
+            data = [[r['trainer'].trainer_id, r['trainer'].full_name, r['trainer'].specialization, r['active_assigned'], r['total_assigned'], r['scheduled_classes'], r['completed_classes']] for r in rows]
+            return reporting.csv_response('trainer_report.csv', ['Trainer ID','Name','Specialization','Active Assigned Members','Total Assigned Members','Scheduled Classes','Completed Classes'], data)
+        return render(request, self.template_name, {'rows': rows, 'start_date': start_date, 'end_date': end_date, 'range_key': range_key, 'range_label': range_label, 'query_string': request.GET.urlencode().replace('export=csv','').strip('&')})
+
+
+class ClassPerformanceReportView(LoginRequiredMixin, StaffRequiredMixin, View):
+    template_name = 'gym/report_classes.html'
+
+    def get(self, request):
+        start_date, end_date, range_key, range_label = reporting.get_date_range(request)
+        classes = GymClass.objects.select_related('trainer').all().order_by('name')
+        rows = []
+        for c in classes:
+            sessions = ClassSession.objects.filter(gym_class=c, start_datetime__date__gte=start_date, start_datetime__date__lte=end_date)
+            total_sessions = sessions.count()
+            upcoming_sessions = sessions.filter(status=ClassSession.Status.SCHEDULED, start_datetime__gte=timezone.now()).count()
+            completed_sessions = sessions.filter(status=ClassSession.Status.COMPLETED).count()
+            enrollments = ClassEnrollment.objects.filter(session__in=sessions, status=ClassEnrollment.Status.ENROLLED)
+            total_enrollments = enrollments.count()
+            # utilization = enrolled / total capacity across sessions
+            cap = sessions.aggregate(total=Coalesce(Sum('capacity'), 0))['total'] or 0
+            utilization = (total_enrollments / cap * 100) if cap else 0
+            rows.append({'gym_class': c, 'total_sessions': total_sessions, 'upcoming_sessions': upcoming_sessions, 'completed_sessions': completed_sessions, 'total_enrollments': total_enrollments, 'utilization': utilization})
+        if request.GET.get('export') == 'csv':
+            data = [[r['gym_class'].name, r['gym_class'].trainer.full_name, r['total_sessions'], r['upcoming_sessions'], r['completed_sessions'], r['total_enrollments'], f"{r['utilization']:.2f}%"] for r in rows]
+            return reporting.csv_response('class_report.csv', ['Class Name','Trainer','Total Sessions','Upcoming Sessions','Completed Sessions','Total Enrollments','Capacity Utilization'], data)
+        return render(request, self.template_name, {'rows': rows, 'start_date': start_date, 'end_date': end_date, 'range_key': range_key, 'range_label': range_label, 'query_string': request.GET.urlencode().replace('export=csv','').strip('&')})

@@ -945,3 +945,117 @@ class ClassEnrollmentConcurrencyTests(TransactionTestCase):
         t1.start(); t2.start(); t1.join(); t2.join()
         enrolled = ClassEnrollment.objects.filter(session=self.session_obj, status='enrolled').count()
         self.assertLessEqual(enrolled, 1)
+
+
+class ReportsDashboardTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='reportstaff', password='pass12345', is_staff=True)
+        self.client.force_login(self.staff)
+        self.plan = MembershipPlan.objects.create(name='Plan1', duration_months=1, price=Decimal('1000.00'), is_active=True)
+        self.m1 = Member.objects.create(full_name='M1', mobile_number='1', gender='male', joining_date=date(2026,11,1), status='active')
+        self.m2 = Member.objects.create(full_name='M2', mobile_number='2', gender='female', joining_date=date(2026,11,2), status='active')
+        self.sub1 = MemberSubscription.objects.create(member=self.m1, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1000.00'), status='active')
+        self.sub2 = MemberSubscription.objects.create(member=self.m2, plan=self.plan, start_date=date(2026,10,1), end_date=date(2026,10,31), price_at_subscription=Decimal('1000.00'), status='expired')
+
+    def test_total_members_kpi(self):
+        r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['total_members'], 2)
+
+    def test_active_memberships_kpi(self):
+        with patch('django.utils.timezone.localdate', return_value=date(2026,11,15)):
+            r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.context['active_memberships'], 1)
+
+    def test_expired_memberships_kpi(self):
+        with patch('django.utils.timezone.localdate', return_value=date(2026,11,15)):
+            r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.context['expired_memberships'], 1)
+
+    def test_total_collection_calculation(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('500.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('200.00'), payment_date=date(2026,11,11), payment_method='bkash', status='completed', collected_by=self.staff)
+        r = self.client.get(reverse('gym:business_dashboard'), {'range': 'this_month', 'start': '2026-11-01', 'end': '2026-11-30'})
+        self.assertEqual(r.context['total_collection'], Decimal('700.00'))
+
+    def test_todays_collection_calculation(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('300.00'), payment_date=date(2026,11,15), payment_method='cash', status='completed', collected_by=self.staff)
+        with patch('django.utils.timezone.localdate', return_value=date(2026,11,15)):
+            r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.context['today_collection'], Decimal('300.00'))
+
+    def test_outstanding_due_calculation(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('400.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        r = self.client.get(reverse('gym:business_dashboard'))
+        # sub1 due 600, sub2 due 1000
+        self.assertEqual(r.context['outstanding_due'], Decimal('1600.00'))
+
+    def test_cancelled_payment_exclusion(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('500.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('200.00'), payment_date=date(2026,11,11), payment_method='cash', status='cancelled', collected_by=self.staff)
+        r = self.client.get(reverse('gym:business_dashboard'), {'range': 'custom', 'start': '2026-11-01', 'end': '2026-11-30'})
+        self.assertEqual(r.context['total_collection'], Decimal('500.00'))
+
+    def test_membership_expiry_report(self):
+        with patch('django.utils.timezone.localdate', return_value=date(2026,11,25)):
+            r = self.client.get(reverse('gym:report_membership'), {'expiry_days': '7'})
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, self.m1.full_name)
+
+    def test_trainer_assignment_report(self):
+        trainer = Trainer.objects.create(full_name='TR1', phone='9', gender='male', specialization='S', experience_years=1, joining_date=date(2026,1,1), status='active')
+        TrainerAssignment.objects.create(trainer=trainer, member=self.m1, start_date=date(2026,11,1), status='active')
+        r = self.client.get(reverse('gym:report_trainers'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'TR1')
+        self.assertContains(r, '1')  # active assigned
+
+    def test_class_enrollment_report(self):
+        trainer = Trainer.objects.create(full_name='TR2', phone='8', gender='male', specialization='S', experience_years=1, joining_date=date(2026,1,1), status='active')
+        cls = GymClass.objects.create(name='YogaR', trainer=trainer, capacity=10, duration_minutes=60, status='active')
+        tz = dj_timezone.get_current_timezone()
+        sess = ClassSession.objects.create(gym_class=cls, trainer=trainer, start_datetime=dj_timezone.make_aware(datetime(2026,11,20,9,0), tz), end_datetime=dj_timezone.make_aware(datetime(2026,11,20,10,0), tz), capacity=10, status='scheduled')
+        ClassEnrollment.objects.create(member=self.m1, session=sess, status='enrolled')
+        r = self.client.get(reverse('gym:report_classes'))
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'YogaR')
+
+    def test_date_range_filtering(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('100.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('200.00'), payment_date=date(2026,10,10), payment_method='cash', status='completed', collected_by=self.staff)
+        r = self.client.get(reverse('gym:report_payments'), {'range': 'custom', 'start': '2026-11-01', 'end': '2026-11-30'})
+        self.assertContains(r, '100.00')
+        self.assertNotContains(r, '200.00')
+
+    def test_csv_export(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('100.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        r = self.client.get(reverse('gym:report_payments'), {'export': 'csv'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('text/csv', r['Content-Type'])
+        self.assertIn(b'Payment Reference', r.content)
+
+    def test_dashboard_report_total_consistency(self):
+        MembershipPayment.objects.create(member=self.m1, subscription=self.sub1, amount=Decimal('350.00'), payment_date=date(2026,11,10), payment_method='cash', status='completed', collected_by=self.staff)
+        dash = self.client.get(reverse('gym:business_dashboard'), {'range': 'custom', 'start': '2026-11-01', 'end': '2026-11-30'})
+        report = self.client.get(reverse('gym:report_payments'), {'range': 'custom', 'start': '2026-11-01', 'end': '2026-11-30', 'status': 'completed'})
+        self.assertEqual(dash.context['total_collection'], report.context['report_total'])
+
+    def test_authentication_and_permissions(self):
+        self.client.logout()
+        urls = [reverse('gym:business_dashboard'), reverse('gym:report_payments'), reverse('gym:report_outstanding_dues')]
+        for url in urls:
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 302)
+        # non-staff gets 403
+        nonstaff = User.objects.create_user(username='normal2', password='pass12345', is_staff=False)
+        self.client.force_login(nonstaff)
+        r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.status_code, 403)
+
+    def test_empty_database_handling(self):
+        MembershipPayment.objects.all().delete()
+        MemberSubscription.objects.all().delete()
+        Member.objects.all().delete()
+        r = self.client.get(reverse('gym:business_dashboard'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['total_members'], 0)

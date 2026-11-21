@@ -1,0 +1,36 @@
+{% extends 'gym/base.html' %}
+{% block title %}Outstanding Due Report | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Outstanding Due Report{% endblock %}
+{% block topbar_actions %}
+<a href="?{{ query_string }}{% if query_string %}&{% endif %}export=csv" class="btn btn-secondary">Export CSV</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Outstanding Dues</h2><p class="card-subtitle">Total outstanding: BDT {{ total_due|floatformat:2 }}</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field field-search"><label>Search</label><input type="text" name="q" value="{{ search_query }}" placeholder="Member name or ID"></div>
+      <div class="field"><label>Plan</label><select name="plan"><option value="">All plans</option>{% for p in plans %}<option value="{{ p.pk }}" {% if plan_filter == p.pk|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Min Due (BDT)</label><input type="number" step="0.01" name="min_due" value="{{ min_due }}" placeholder="0.00"></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+  {% if rows %}
+  <div class="table-wrap"><table><thead><tr><th>Member ID</th><th>Member Name</th><th>Plan</th><th>Total Fee</th><th>Paid</th><th>Due</th><th>Subscription Status</th><th>Actions</th></tr></thead><tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.member.member_id }}</td>
+      <td><a class="table-link" href="{% url 'gym:member_detail' r.member.pk %}">{{ r.member.full_name }}</a></td>
+      <td>{{ r.plan.name }}</td>
+      <td>BDT {{ r.total_fee|floatformat:2 }}</td>
+      <td>BDT {{ r.paid_amount|floatformat:2 }}</td>
+      <td>BDT {{ r.due_amount|floatformat:2 }}</td>
+      <td>{{ r.subscription_status|capfirst }}</td>
+      <td><div class="actions"><a href="{% url 'gym:member_detail' r.member.pk %}" class="btn btn-secondary btn-sm">History</a><a href="{% url 'gym:payment_collect' r.member.pk %}?subscription={{ r.subscription.pk }}" class="btn btn-primary btn-sm">Collect</a></div></td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><p class="muted">No outstanding dues found.</p></div>{% endif %}
+</section>
+{% endblock %}

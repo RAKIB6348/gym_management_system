@@ -1,0 +1,45 @@
+{% extends 'gym/base.html' %}
+{% block title %}Membership Report | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Membership Report{% endblock %}
+{% block topbar_actions %}
+<a href="?{{ query_string }}{% if query_string %}&{% endif %}export=csv" class="btn btn-secondary">Export CSV</a>
+{% endblock %}
+{% block content %}
+<section class="card" style="margin-bottom:24px;">
+  <div class="card-header">
+    <div><h2 class="card-title">Filters</h2><p class="card-subtitle">Period metrics use selected range; membership status counts are current.</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field"><label>Range</label><select name="range"><option value="today" {% if range_key == 'today' %}selected{% endif %}>Today</option><option value="this_week" {% if range_key == 'this_week' %}selected{% endif %}>This Week</option><option value="this_month" {% if range_key == 'this_month' %}selected{% endif %}>This Month</option><option value="this_year" {% if range_key == 'this_year' %}selected{% endif %}>This Year</option><option value="custom" {% if range_key == 'custom' %}selected{% endif %}>Custom</option></select></div>
+      <div class="field"><label>Start</label><input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}"></div>
+      <div class="field"><label>End</label><input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}"></div>
+      <div class="field"><label>Expiring Soon</label><select name="expiry_days"><option value="7" {% if expiry_days == '7' %}selected{% endif %}>Next 7 Days</option><option value="15" {% if expiry_days == '15' %}selected{% endif %}>Next 15 Days</option><option value="30" {% if expiry_days == '30' %}selected{% endif %}>Next 30 Days</option></select></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+</section>
+<section class="stats-grid" style="grid-template-columns: repeat(3, minmax(0,1fr));">
+  <div class="stat-card"><div class="stat-label">Total Registered Members</div><div class="stat-value">{{ total_registered }}</div></div>
+  <div class="stat-card"><div class="stat-label">Active Memberships (Current)</div><div class="stat-value success">{{ active_memberships }}</div></div>
+  <div class="stat-card"><div class="stat-label">Expired Memberships (Current)</div><div class="stat-value" style="color:#dc2626;">{{ expired_memberships }}</div></div>
+  <div class="stat-card"><div class="stat-label">Upcoming Memberships (Current)</div><div class="stat-value">{{ upcoming_memberships }}</div></div>
+  <div class="stat-card"><div class="stat-label">New Registrations (Period)</div><div class="stat-value">{{ new_registrations }}</div></div>
+  <div class="stat-card"><div class="stat-label">Membership Renewals (Period)</div><div class="stat-value">{{ renewals }}</div></div>
+</section>
+<div class="detail-sections">
+  <section class="card"><div class="card-header"><div><h2 class="card-title">Memberships Expiring Soon</h2><p class="card-subtitle">Next {{ expiry_days }} days.</p></div></div>
+    {% if expiring_rows %}
+    <div class="table-wrap"><table><thead><tr><th>Member</th><th>Plan</th><th>Start</th><th>End</th><th>Status</th></tr></thead><tbody>
+      {% for s in expiring_rows %}<tr><td><a class="table-link" href="{% url 'gym:member_detail' s.member.pk %}">{{ s.member.member_id }} - {{ s.member.full_name }}</a></td><td>{{ s.plan.name }}</td><td>{{ s.start_date|date:"M d, Y" }}</td><td>{{ s.end_date|date:"M d, Y" }}</td><td>{{ s.current_status|capfirst }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state"><p class="muted">No memberships expiring in this window.</p></div>{% endif %}
+  </section>
+  <section class="card"><div class="card-header"><div><h2 class="card-title">New Member Registrations</h2><p class="card-subtitle">Members who joined in selected period.</p></div></div>
+    {% if new_members %}
+    <div class="table-wrap"><table><thead><tr><th>Member ID</th><th>Name</th><th>Phone</th><th>Joining Date</th><th>Status</th></tr></thead><tbody>
+      {% for m in new_members %}<tr><td><a class="table-link" href="{% url 'gym:member_detail' m.pk %}">{{ m.member_id }}</a></td><td>{{ m.full_name }}</td><td>{{ m.mobile_number }}</td><td>{{ m.joining_date|date:"M d, Y" }}</td><td>{{ m.get_status_display }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state"><p class="muted">No new registrations in selected period.</p></div>{% endif %}
+  </section>
+</div>
+{% endblock %}

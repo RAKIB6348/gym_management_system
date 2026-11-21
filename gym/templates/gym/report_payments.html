@@ -1,0 +1,35 @@
+{% extends 'gym/base.html' %}
+{% block title %}Payment Report | Gym Management{% endblock %}
+{% block eyebrow %}Reports{% endblock %}
+{% block page_title %}Payment Report{% endblock %}
+{% block topbar_actions %}
+<a href="?{{ query_string }}{% if query_string %}&{% endif %}export=csv" class="btn btn-secondary">Export CSV</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Payment Report</h2><p class="card-subtitle">Completed total in filtered results: BDT {{ report_total|floatformat:2 }}</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field"><label>Range</label><select name="range"><option value="today" {% if range_key == 'today' %}selected{% endif %}>Today</option><option value="this_week" {% if range_key == 'this_week' %}selected{% endif %}>This Week</option><option value="this_month" {% if range_key == 'this_month' %}selected{% endif %}>This Month</option><option value="this_year" {% if range_key == 'this_year' %}selected{% endif %}>This Year</option><option value="custom" {% if range_key == 'custom' %}selected{% endif %}>Custom</option></select></div>
+      <div class="field"><label>Start</label><input type="date" name="start" value="{{ start_date|date:'Y-m-d' }}"></div>
+      <div class="field"><label>End</label><input type="date" name="end" value="{{ end_date|date:'Y-m-d' }}"></div>
+      <div class="field field-search"><label>Search</label><input type="text" name="q" value="{{ search_query }}" placeholder="Member name, ID, reference"></div>
+      <div class="field"><label>Method</label><select name="method"><option value="">All</option>{% for v,l in method_choices %}<option value="{{ v }}" {% if method_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Status</label><select name="status"><option value="">All</option>{% for v,l in status_choices %}<option value="{{ v }}" {% if status_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+  {% if payments %}
+  <div class="table-wrap"><table><thead><tr><th>Reference</th><th>Member ID</th><th>Member Name</th><th>Plan</th><th>Date</th><th>Method</th><th>Amount</th><th>Status</th><th>Collected By</th></tr></thead><tbody>
+    {% for p in payments %}
+    <tr>
+      <td>{{ p.payment_reference }}</td><td>{{ p.member.member_id }}</td><td><a class="table-link" href="{% url 'gym:member_detail' p.member.pk %}">{{ p.member.full_name }}</a></td><td>{{ p.subscription.plan.name }}</td><td>{{ p.payment_date|date:"M d, Y" }}</td><td>{{ p.get_payment_method_display }}</td><td>BDT {{ p.amount|floatformat:2 }}</td><td>{% if p.status == 'completed' %}<span class="badge badge-active">Completed</span>{% else %}<span class="badge badge-cancelled">Cancelled</span>{% endif %}</td><td>{{ p.collected_by.get_full_name|default:p.collected_by.username }}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% if is_paginated %}
+  <div class="pagination"><div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div><div class="page-links">{% if page_obj.has_previous %}<a class="page-link" href="?{{ query_string }}&page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link disabled">Previous</span>{% endif %}{% if page_obj.has_next %}<a class="page-link" href="?{{ query_string }}&page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link disabled">Next</span>{% endif %}</div></div>
+  {% endif %}
+  {% else %}<div class="empty-state"><p class="muted">No payments found for the selected filters.</p></div>{% endif %}
+</section>
+{% endblock %}

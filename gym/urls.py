@@ -54,4 +54,12 @@ urlpatterns = [
     path('classes/sessions/<int:pk>/cancel/', views.ClassSessionCancelView.as_view(), name='class_session_cancel'),
     path('classes/sessions/<int:pk>/enroll/', views.ClassSessionEnrollView.as_view(), name='class_session_enroll'),
     path('classes/enrollments/<int:pk>/cancel/', views.ClassEnrollmentCancelView.as_view(), name='class_enrollment_cancel'),
+
+    path('dashboard/', views.BusinessDashboardView.as_view(), name='business_dashboard'),
+    path('reports/', views.ReportsIndexView.as_view(), name='reports_index'),
+    path('reports/payments/', views.PaymentReportView.as_view(), name='report_payments'),
+    path('reports/outstanding-dues/', views.OutstandingDueReportView.as_view(), name='report_outstanding_dues'),
+    path('reports/membership/', views.MembershipReportView.as_view(), name='report_membership'),
+    path('reports/trainers/', views.TrainerPerformanceReportView.as_view(), name='report_trainers'),
+    path('reports/classes/', views.ClassPerformanceReportView.as_view(), name='report_classes'),
 ]
