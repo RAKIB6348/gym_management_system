@@ -1,0 +1,71 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Gym Management{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{% static 'gym/css/styles.css' %}">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">GM</div>
+        <div>
+          <div class="brand-title">GymFlow</div>
+          <div class="brand-subtitle">Management System</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="{% url 'gym:member_list' %}" class="nav-item {% if request.resolver_match.url_name == 'member_list' or request.resolver_match.url_name == 'member_detail' or request.resolver_match.url_name == 'member_create' or request.resolver_match.url_name == 'member_edit' %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Members</span>
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        {% if request.user.is_authenticated %}
+        <div class="user-chip">
+          <div class="user-avatar">{{ request.user.username|slice:":1"|upper }}</div>
+          <div class="user-meta">
+            <div class="user-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+            <div class="user-role">Staff</div>
+          </div>
+        </div>
+        <form method="post" action="{% url 'logout' %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-ghost btn-block">Sign out</button>
+        </form>
+        {% endif %}
+      </div>
+    </aside>
+
+    <div class="main-panel">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">{% block eyebrow %}Gym Management{% endblock %}</p>
+          <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
+        </div>
+        <div class="topbar-actions">
+          {% block topbar_actions %}{% endblock %}
+        </div>
+      </header>
+
+      <main class="content">
+        {% if messages %}
+        <div class="messages">
+          {% for message in messages %}
+          <div class="alert alert-{{ message.tags|default:'info' }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,133 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{{ member.full_name }} | Gym Management{% endblock %}
+{% block eyebrow %}Member Profile{% endblock %}
+{% block page_title %}{{ member.full_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:member_edit' member.pk %}" class="btn btn-primary">Edit Profile</a>
+<form method="post" action="{% url 'gym:member_toggle_status' member.pk %}" class="inline-form">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{% url 'gym:member_detail' member.pk %}">
+  {% if member.status == 'active' %}
+  <button type="submit" class="btn btn-danger">Deactivate</button>
+  {% else %}
+  <button type="submit" class="btn btn-success">Activate</button>
+  {% endif %}
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="profile-layout">
+  <aside class="card profile-card">
+    {% if member.profile_photo %}
+    <img src="{{ member.profile_photo.url }}" alt="{{ member.full_name }}" class="avatar-lg">
+    {% else %}
+    <div class="avatar-lg">{{ member.full_name|slice:":1"|upper }}</div>
+    {% endif %}
+    <h2 class="profile-name">{{ member.full_name }}</h2>
+    <p class="profile-id">{{ member.member_id }}</p>
+    <span class="badge badge-{{ member.status }}">{{ member.get_status_display }}</span>
+
+    <div class="profile-meta">
+      <div class="meta-item">
+        <div class="meta-label">Joining Date</div>
+        <div class="meta-value">{{ member.joining_date|date:"F d, Y" }}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Mobile Number</div>
+        <div class="meta-value">{{ member.mobile_number }}</div>
+      </div>
+      <div class="meta-item">
+        <div class="meta-label">Email</div>
+        <div class="meta-value">{{ member.email|default:"Not provided" }}</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="detail-sections">
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Basic Information</h2>
+          <p class="card-subtitle">Personal and membership details.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="meta-label">Full Name</div>
+            <div class="meta-value">{{ member.full_name }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Member ID</div>
+            <div class="meta-value">{{ member.member_id }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Gender</div>
+            <div class="meta-value">{{ member.get_gender_display }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Date of Birth</div>
+            <div class="meta-value">{% if member.date_of_birth %}{{ member.date_of_birth|date:"F d, Y" }}{% else %}Not provided{% endif %}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Current Status</div>
+            <div class="meta-value"><span class="badge badge-{{ member.status }}">{{ member.get_status_display }}</span></div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Joining Date</div>
+            <div class="meta-value">{{ member.joining_date|date:"F d, Y" }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Contact Details</h2>
+          <p class="card-subtitle">How to reach this member.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="meta-label">Mobile Number</div>
+            <div class="meta-value">{{ member.mobile_number }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Email Address</div>
+            <div class="meta-value">{{ member.email|default:"Not provided" }}</div>
+          </div>
+          <div class="detail-item full">
+            <div class="meta-label">Address</div>
+            <div class="meta-value">{{ member.address|default:"Not provided"|linebreaksbr }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Emergency Contact</h2>
+          <p class="card-subtitle">Contact person in case of emergency.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="detail-grid">
+          <div class="detail-item">
+            <div class="meta-label">Contact Name</div>
+            <div class="meta-value">{{ member.emergency_contact_name|default:"Not provided" }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Contact Number</div>
+            <div class="meta-value">{{ member.emergency_contact_number|default:"Not provided" }}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,148 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Members | Gym Management{% endblock %}
+{% block eyebrow %}Member Management{% endblock %}
+{% block page_title %}Members{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:member_create' %}" class="btn btn-primary">+ Add New Member</a>
+{% endblock %}
+
+{% block content %}
+<section class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-label">Total Members</div>
+    <div class="stat-value">{{ total_members }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Active Members</div>
+    <div class="stat-value success">{{ active_members }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Inactive Members</div>
+    <div class="stat-value muted">{{ inactive_members }}</div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Member Directory</h2>
+      <p class="card-subtitle">Search, filter, and manage gym members.</p>
+    </div>
+    <form method="get" class="filter-bar" aria-label="Filter members">
+      <div class="field field-search">
+        <label for="q">Search</label>
+        <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Search by name, phone, or member ID">
+      </div>
+      <div class="field field-status">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All statuses</option>
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or status_filter %}
+      <a href="{% url 'gym:member_list' %}" class="btn btn-secondary">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if members %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Member</th>
+          <th>Member ID</th>
+          <th>Phone</th>
+          <th>Joining Date</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for member in members %}
+        <tr>
+          <td>
+            <div class="member-cell">
+              {% if member.profile_photo %}
+              <img src="{{ member.profile_photo.url }}" alt="{{ member.full_name }}" class="avatar">
+              {% else %}
+              <div class="avatar">{{ member.full_name|slice:":1"|upper }}</div>
+              {% endif %}
+              <div>
+                <div class="member-name">{{ member.full_name }}</div>
+                <div class="member-sub">{{ member.email|default:"No email" }}</div>
+              </div>
+            </div>
+          </td>
+          <td>{{ member.member_id }}</td>
+          <td>{{ member.mobile_number }}</td>
+          <td>{{ member.joining_date|date:"M d, Y" }}</td>
+          <td>
+            <span class="badge badge-{{ member.status }}">{{ member.get_status_display }}</span>
+          </td>
+          <td>
+            <div class="actions">
+              <a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary btn-sm">View</a>
+              <a href="{% url 'gym:member_edit' member.pk %}" class="btn btn-secondary btn-sm">Edit</a>
+              <form method="post" action="{% url 'gym:member_toggle_status' member.pk %}" class="inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                {% if member.status == 'active' %}
+                <button type="submit" class="btn btn-danger btn-sm">Deactivate</button>
+                {% else %}
+                <button type="submit" class="btn btn-success btn-sm">Activate</button>
+                {% endif %}
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if is_paginated %}
+  <div class="pagination">
+    <div class="page-info">
+      Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &middot; {{ page_obj.paginator.count }} member{{ page_obj.paginator.count|pluralize }}
+    </div>
+    <div class="page-links">
+      {% if page_obj.has_previous %}
+      <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+      {% else %}
+      <span class="page-link disabled">Previous</span>
+      {% endif %}
+
+      {% for num in page_obj.paginator.page_range %}
+        {% if num == page_obj.number %}
+          <span class="page-link active">{{ num }}</span>
+        {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+          <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+        {% endif %}
+      {% endfor %}
+
+      {% if page_obj.has_next %}
+      <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+      {% else %}
+      <span class="page-link disabled">Next</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">👥</div>
+    <h3>No members found</h3>
+    <p>{% if search_query or status_filter %}Try adjusting your search or filter.{% else %}Add your first gym member to get started.{% endif %}</p>
+    <a href="{% url 'gym:member_create' %}" class="btn btn-primary">Add New Member</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
