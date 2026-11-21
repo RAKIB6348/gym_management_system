@@ -1,6 +1,10 @@
 from django.contrib import admin
 
-from .models import Member, MembershipPlan, MemberSubscription, MembershipPayment, Trainer, TrainerAssignment, TrainerAvailability
+from .models import (
+    Member, MembershipPlan, MemberSubscription, MembershipPayment,
+    Trainer, TrainerAssignment, TrainerAvailability,
+    GymClass, ClassSchedule, ClassSession, ClassEnrollment,
+)
 
 
 @admin.register(Member)
@@ -54,3 +58,28 @@ class TrainerAvailabilityAdmin(admin.ModelAdmin):
     list_display = ('trainer', 'day_of_week', 'start_time', 'end_time', 'is_available')
     list_filter = ('day_of_week', 'is_available')
     search_fields = ('trainer__trainer_id', 'trainer__full_name')
+
+
+@admin.register(GymClass)
+class GymClassAdmin(admin.ModelAdmin):
+    list_display = ('name', 'trainer', 'capacity', 'duration_minutes', 'status')
+    list_filter = ('status',)
+    search_fields = ('name', 'trainer__full_name')
+
+
+@admin.register(ClassSchedule)
+class ClassScheduleAdmin(admin.ModelAdmin):
+    list_display = ('gym_class', 'day_of_week', 'start_time', 'end_time', 'is_active')
+    list_filter = ('day_of_week', 'is_active')
+
+
+@admin.register(ClassSession)
+class ClassSessionAdmin(admin.ModelAdmin):
+    list_display = ('gym_class', 'trainer', 'start_datetime', 'end_datetime', 'capacity', 'status')
+    list_filter = ('status',)
+
+
+@admin.register(ClassEnrollment)
+class ClassEnrollmentAdmin(admin.ModelAdmin):
+    list_display = ('member', 'session', 'status', 'enrolled_at')
+    list_filter = ('status',)

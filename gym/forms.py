@@ -2,11 +2,13 @@ from decimal import Decimal
 
 from django import forms
 from django.core.validators import RegexValidator
+from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
     Member, MemberSubscription, MembershipPayment, MembershipPlan,
     Trainer, TrainerAssignment, TrainerAvailability,
+    GymClass, ClassSchedule, ClassSession, ClassEnrollment,
     calculate_subscription_end_date,
 )
 
@@ -269,3 +271,45 @@ class TrainerAvailabilityForm(forms.ModelForm):
             'start_time': forms.TimeInput(attrs={'type': 'time'}),
             'end_time': forms.TimeInput(attrs={'type': 'time'}),
         }
+
+
+class GymClassForm(forms.ModelForm):
+    class Meta:
+        model = GymClass
+        fields = ['name', 'description', 'trainer', 'capacity', 'duration_minutes', 'status']
+        widgets = {
+            'name': forms.TextInput(attrs={'placeholder': 'e.g. Yoga, HIIT'}),
+            'description': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Optional class description'}),
+            'capacity': forms.NumberInput(attrs={'min': 1}),
+            'duration_minutes': forms.NumberInput(attrs={'min': 1}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['trainer'].queryset = Trainer.objects.filter(status=Trainer.Status.ACTIVE).order_by('full_name')
+        if self.instance and self.instance.pk and self.instance.trainer_id:
+            self.fields['trainer'].queryset = Trainer.objects.filter(
+                Q(status=Trainer.Status.ACTIVE) | Q(pk=self.instance.trainer_id)
+            ).order_by('full_name')
+
+    def clean(self):
+        cleaned = super().clean()
+        trainer = cleaned.get('trainer')
+        status = cleaned.get('status')
+        if trainer and status == GymClass.Status.ACTIVE and trainer.status != Trainer.Status.ACTIVE:
+            self.add_error('trainer', 'Active classes must have an active trainer.')
+        return cleaned
+
+
+class ClassScheduleForm(forms.ModelForm):
+    class Meta:
+        model = ClassSchedule
+        fields = ['day_of_week', 'start_time', 'end_time', 'is_active']
+        widgets = {
+            'start_time': forms.TimeInput(attrs={'type': 'time'}),
+            'end_time': forms.TimeInput(attrs={'type': 'time'}),
+        }
+
+
+class SessionGenerateForm(forms.Form):
+    days_ahead = forms.IntegerField(min_value=1, max_value=30, initial=7, help_text='Generate sessions for the next N days (max 30).')

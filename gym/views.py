@@ -1,5 +1,5 @@
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.contrib import messages
@@ -17,10 +17,12 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 from .forms import (
     MemberForm, MembershipPlanForm, PaymentCollectForm, SubscriptionAssignForm,
     TrainerForm, TrainerAssignmentForm, TrainerAvailabilityForm,
+    GymClassForm, ClassScheduleForm, SessionGenerateForm,
 )
 from .models import (
     Member, MemberSubscription, MembershipPayment, MembershipPlan,
     Trainer, TrainerAssignment, TrainerAvailability,
+    GymClass, ClassSchedule, ClassSession, ClassEnrollment,
 )
 
 
@@ -122,6 +124,13 @@ class MemberDetailView(LoginRequiredMixin, DetailView):
         )
         current_trainer_assignment = next((a for a in trainer_assignments if a.status == TrainerAssignment.Status.ACTIVE), None)
 
+        now = timezone.now()
+        class_enrollments = list(
+            self.object.class_enrollments.select_related('session', 'session__gym_class', 'session__trainer').order_by('-session__start_datetime')
+        )
+        upcoming_class_enrollments = [e for e in class_enrollments if e.session.start_datetime >= now]
+        upcoming_class_enrollments.sort(key=lambda e: e.session.start_datetime)
+
         context['subscriptions'] = subscriptions
         context['current_subscription'] = current_subscription
         context['today'] = today
@@ -129,6 +138,8 @@ class MemberDetailView(LoginRequiredMixin, DetailView):
         context['current_payment_summary'] = current_payment_summary
         context['trainer_assignments'] = trainer_assignments
         context['current_trainer_assignment'] = current_trainer_assignment
+        context['class_enrollments'] = class_enrollments
+        context['upcoming_class_enrollments'] = upcoming_class_enrollments
         return context
 
 
@@ -971,4 +982,308 @@ class TrainerDashboardView(LoginRequiredMixin, View):
             'members_with_trainers': members_with_trainers,
             'recent_assignments': recent_assignments,
             'top_trainers': top_trainers,
+        })
+
+
+# -------------------- Class & Schedule Management --------------------
+
+class GymClassListView(LoginRequiredMixin, ListView):
+    model = GymClass
+    template_name = 'gym/class_list.html'
+    context_object_name = 'classes'
+    paginate_by = 10
+
+    def get_queryset(self):
+        qs = GymClass.objects.select_related('trainer').all()
+        q = self.request.GET.get('q', '').strip()
+        status = self.request.GET.get('status', '').strip()
+        trainer = self.request.GET.get('trainer', '').strip()
+        if q:
+            qs = qs.filter(Q(name__icontains=q) | Q(description__icontains=q) | Q(trainer__full_name__icontains=q))
+        if status in {GymClass.Status.ACTIVE, GymClass.Status.INACTIVE}:
+            qs = qs.filter(status=status)
+        if trainer:
+            qs = qs.filter(trainer_id=trainer)
+        return qs.order_by('name')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        context['status_filter'] = self.request.GET.get('status', '').strip()
+        context['trainer_filter'] = self.request.GET.get('trainer', '').strip()
+        context['status_choices'] = GymClass.Status.choices
+        context['trainers'] = Trainer.objects.order_by('full_name')
+        params = self.request.GET.copy(); params.pop('page', None)
+        context['query_string'] = params.urlencode()
+        return context
+
+
+class GymClassCreateView(LoginRequiredMixin, CreateView):
+    model = GymClass
+    form_class = GymClassForm
+    template_name = 'gym/class_form.html'
+
+    def get_success_url(self):
+        return reverse('gym:class_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f'Class "{self.object.name}" created.')
+        return response
+
+    def form_invalid(self, form):
+        messages.error(self.request, 'Please correct the errors below.')
+        return super().form_invalid(form)
+
+
+class GymClassUpdateView(LoginRequiredMixin, UpdateView):
+    model = GymClass
+    form_class = GymClassForm
+    template_name = 'gym/class_form.html'
+
+    def get_success_url(self):
+        return reverse('gym:class_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f'Class "{self.object.name}" updated.')
+        return response
+
+    def form_invalid(self, form):
+        messages.error(self.request, 'Please correct the errors below.')
+        return super().form_invalid(form)
+
+
+class GymClassDetailView(LoginRequiredMixin, DetailView):
+    model = GymClass
+    template_name = 'gym/class_detail.html'
+    context_object_name = 'gym_class'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        gym_class = self.object
+        now = timezone.now()
+        schedules = gym_class.schedules.order_by('day_of_week', 'start_time')
+        upcoming_sessions = gym_class.sessions.select_related('trainer').filter(start_datetime__gte=now).order_by('start_datetime')[:20]
+        session_ids = [s.pk for s in upcoming_sessions]
+        enrollments = ClassEnrollment.objects.filter(session_id__in=session_ids, status=ClassEnrollment.Status.ENROLLED).select_related('member', 'session')
+        enrollments_by_session = {}
+        for e in enrollments:
+            enrollments_by_session.setdefault(e.session_id, []).append(e)
+        for s in upcoming_sessions:
+            s.enrolled_count_value = len(enrollments_by_session.get(s.pk, []))
+            s.available_seats_value = max(s.capacity - s.enrolled_count_value, 0)
+            s.enrolled_members_list = enrollments_by_session.get(s.pk, [])
+        context['schedules'] = schedules
+        context['upcoming_sessions'] = upcoming_sessions
+        context['schedule_form'] = ClassScheduleForm()
+        context['generate_form'] = SessionGenerateForm()
+        context['active_members'] = Member.objects.filter(status=Member.Status.ACTIVE).order_by('full_name')
+        return context
+
+
+class GymClassToggleStatusView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        gym_class = get_object_or_404(GymClass, pk=pk)
+        gym_class.status = GymClass.Status.INACTIVE if gym_class.status == GymClass.Status.ACTIVE else GymClass.Status.ACTIVE
+        gym_class.save(update_fields=['status', 'updated_at'])
+        messages.success(request, f'Class "{gym_class.name}" was {"activated" if gym_class.status == GymClass.Status.ACTIVE else "deactivated"}.')
+        return redirect(request.POST.get('next') or reverse('gym:class_detail', kwargs={'pk': pk}))
+
+
+class ClassScheduleCreateView(LoginRequiredMixin, View):
+    def post(self, request, class_pk):
+        gym_class = get_object_or_404(GymClass, pk=class_pk)
+        form = ClassScheduleForm(request.POST)
+        if form.is_valid():
+            schedule = form.save(commit=False)
+            schedule.gym_class = gym_class
+            try:
+                schedule.save()
+                messages.success(request, 'Schedule added.')
+            except Exception as exc:
+                messages.error(request, str(exc))
+        else:
+            messages.error(request, 'Please correct schedule errors.')
+        return redirect('gym:class_detail', pk=class_pk)
+
+
+class ClassScheduleToggleView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        schedule = get_object_or_404(ClassSchedule, pk=pk)
+        schedule.is_active = not schedule.is_active
+        try:
+            schedule.save(update_fields=['is_active', 'updated_at'])
+            messages.success(request, 'Schedule updated.')
+        except Exception as exc:
+            messages.error(request, str(exc))
+        return redirect(request.POST.get('next') or reverse('gym:class_detail', kwargs={'pk': schedule.gym_class_id}))
+
+
+class ClassSessionGenerateView(LoginRequiredMixin, View):
+    def post(self, request, class_pk):
+        gym_class = get_object_or_404(GymClass, pk=class_pk)
+        form = SessionGenerateForm(request.POST)
+        if not form.is_valid():
+            messages.error(request, 'Invalid generation period.')
+            return redirect('gym:class_detail', pk=class_pk)
+        days_ahead = form.cleaned_data['days_ahead']
+        created = 0
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        end_date = today + timedelta(days=days_ahead)
+        schedules = gym_class.schedules.filter(is_active=True)
+        for schedule in schedules:
+            d = today
+            while d <= end_date:
+                if d.weekday() == schedule.day_of_week:
+                    start_dt = timezone.make_aware(datetime.combine(d, schedule.start_time), tz)
+                    end_dt = timezone.make_aware(datetime.combine(d, schedule.end_time), tz)
+                    exists = ClassSession.objects.filter(schedule=schedule, start_datetime=start_dt).exists()
+                    if not exists:
+                        try:
+                            ClassSession.objects.create(
+                                gym_class=gym_class,
+                                schedule=schedule,
+                                trainer=gym_class.trainer,
+                                start_datetime=start_dt,
+                                end_datetime=end_dt,
+                                capacity=gym_class.capacity,
+                                status=ClassSession.Status.SCHEDULED,
+                            )
+                            created += 1
+                        except Exception:
+                            pass  # skip conflicts/duplicates
+                d += timedelta(days=1)
+        messages.success(request, f'{created} session(s) generated.')
+        return redirect('gym:class_detail', pk=class_pk)
+
+
+class ClassSessionCancelView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        session = get_object_or_404(ClassSession, pk=pk)
+        if session.status == ClassSession.Status.SCHEDULED:
+            session.status = ClassSession.Status.CANCELLED
+            session.save(update_fields=['status', 'updated_at'])
+            messages.success(request, 'Session cancelled.')
+        else:
+            messages.info(request, 'Only scheduled sessions can be cancelled.')
+        return redirect(request.POST.get('next') or reverse('gym:class_detail', kwargs={'pk': session.gym_class_id}))
+
+
+class ClassSessionEnrollView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        session = get_object_or_404(ClassSession.objects.select_related('gym_class', 'trainer'), pk=pk)
+        member_id = request.POST.get('member_id')
+        member = get_object_or_404(Member, pk=member_id)
+        try:
+            with transaction.atomic():
+                locked_session = ClassSession.objects.select_for_update().get(pk=session.pk)
+                if locked_session.status != ClassSession.Status.SCHEDULED:
+                    raise ValueError('Only scheduled sessions can be enrolled.')
+                if member.status != Member.Status.ACTIVE:
+                    raise ValueError('Inactive members cannot be enrolled.')
+                enrolled_count = ClassEnrollment.objects.filter(session=locked_session, status=ClassEnrollment.Status.ENROLLED).count()
+                if enrolled_count >= locked_session.capacity:
+                    raise ValueError('Class session is full.')
+                session_date = timezone.localdate(locked_session.start_datetime)
+                has_membership = MemberSubscription.objects.filter(
+                    member=member, start_date__lte=session_date, end_date__gte=session_date
+                ).exclude(status=MemberSubscription.Status.CANCELLED).exists()
+                if not has_membership:
+                    raise ValueError('Member must have a valid membership covering the session date.')
+                dup = ClassEnrollment.objects.filter(member=member, session=locked_session, status=ClassEnrollment.Status.ENROLLED).exists()
+                if dup:
+                    raise ValueError('Member is already enrolled in this session.')
+                overlap = ClassEnrollment.objects.filter(
+                    member=member, status=ClassEnrollment.Status.ENROLLED,
+                    session__status=ClassSession.Status.SCHEDULED,
+                    session__start_datetime__lt=locked_session.end_datetime,
+                    session__end_datetime__gt=locked_session.start_datetime,
+                ).exists()
+                if overlap:
+                    raise ValueError('Member already has an overlapping class booking.')
+                ClassEnrollment.objects.create(member=member, session=locked_session, status=ClassEnrollment.Status.ENROLLED)
+        except Exception as exc:
+            messages.error(request, str(exc))
+            return redirect(request.POST.get('next') or reverse('gym:class_detail', kwargs={'pk': session.gym_class_id}))
+        messages.success(request, f'{member.full_name} enrolled in {session.gym_class.name}.')
+        return redirect(request.POST.get('next') or reverse('gym:class_detail', kwargs={'pk': session.gym_class_id}))
+
+
+class ClassEnrollmentCancelView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        enrollment = get_object_or_404(ClassEnrollment.objects.select_related('session', 'member'), pk=pk)
+        if enrollment.status == ClassEnrollment.Status.ENROLLED:
+            enrollment.status = ClassEnrollment.Status.CANCELLED
+            enrollment.save(update_fields=['status'])
+            messages.success(request, 'Enrollment cancelled.')
+        else:
+            messages.info(request, 'Enrollment is already cancelled.')
+        return redirect(request.POST.get('next') or reverse('gym:member_detail', kwargs={'pk': enrollment.member_id}))
+
+
+class WeeklyScheduleView(LoginRequiredMixin, View):
+    template_name = 'gym/weekly_schedule.html'
+
+    def get(self, request):
+        now = timezone.now()
+        week_start = timezone.localdate()
+        # show next 7 days
+        week_end = week_start + timedelta(days=7)
+        sessions = ClassSession.objects.select_related('gym_class', 'trainer').filter(
+            start_datetime__date__gte=week_start,
+            start_datetime__date__lt=week_end,
+        ).order_by('start_datetime')
+        trainer_filter = request.GET.get('trainer', '').strip()
+        class_filter = request.GET.get('gym_class', '').strip()
+        day_filter = request.GET.get('day', '').strip()
+        if trainer_filter:
+            sessions = sessions.filter(trainer_id=trainer_filter)
+        if class_filter:
+            sessions = sessions.filter(gym_class_id=class_filter)
+        if day_filter != '':
+            try:
+                day = int(day_filter)
+                django_week_day = (day + 1) % 7 + 1  # our 0=Mon -> Django 2, ..., 6=Sun -> 1
+                sessions = sessions.filter(start_datetime__week_day=django_week_day)
+            except ValueError:
+                pass
+        sessions = list(sessions)
+        for s in sessions:
+            s.enrolled_count_value = s.enrollments.filter(status=ClassEnrollment.Status.ENROLLED).count()
+            s.available_seats_value = max(s.capacity - s.enrolled_count_value, 0)
+        return render(request, self.template_name, {
+            'sessions': sessions,
+            'trainers': Trainer.objects.order_by('full_name'),
+            'classes': GymClass.objects.order_by('name'),
+            'trainer_filter': trainer_filter,
+            'class_filter': class_filter,
+            'day_filter': day_filter,
+            'week_start': week_start,
+            'week_end': week_end - timedelta(days=1),
+        })
+
+
+class ClassDashboardView(LoginRequiredMixin, View):
+    template_name = 'gym/class_dashboard.html'
+
+    def get(self, request):
+        today = timezone.localdate()
+        total_active_classes = GymClass.objects.filter(status=GymClass.Status.ACTIVE).count()
+        upcoming_sessions_count = ClassSession.objects.filter(status=ClassSession.Status.SCHEDULED, start_datetime__gte=timezone.now()).count()
+        total_enrolled_members = ClassEnrollment.objects.filter(status=ClassEnrollment.Status.ENROLLED, session__status=ClassSession.Status.SCHEDULED).values('member').distinct().count()
+        today_sessions_count = ClassSession.objects.filter(status=ClassSession.Status.SCHEDULED, start_datetime__date=today).count()
+        upcoming_sessions = list(ClassSession.objects.select_related('gym_class', 'trainer').filter(
+            status=ClassSession.Status.SCHEDULED, start_datetime__gte=timezone.now()
+        ).order_by('start_datetime')[:10])
+        for s in upcoming_sessions:
+            s.enrolled_count_value = s.enrollments.filter(status=ClassEnrollment.Status.ENROLLED).count()
+            s.available_seats_value = max(s.capacity - s.enrolled_count_value, 0)
+        return render(request, self.template_name, {
+            'total_active_classes': total_active_classes,
+            'upcoming_sessions_count': upcoming_sessions_count,
+            'total_enrolled_members': total_enrolled_members,
+            'today_sessions_count': today_sessions_count,
+            'upcoming_sessions': upcoming_sessions,
         })

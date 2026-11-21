@@ -1,0 +1,36 @@
+{% extends 'gym/base.html' %}
+{% block title %}Class Dashboard | Gym Management{% endblock %}
+{% block eyebrow %}Class Management{% endblock %}
+{% block page_title %}Class Dashboard{% endblock %}
+{% block topbar_actions %}
+<a href="{% url 'gym:class_list' %}" class="btn btn-secondary">Classes</a>
+<a href="{% url 'gym:weekly_schedule' %}" class="btn btn-secondary">Weekly Schedule</a>
+{% endblock %}
+{% block content %}
+<section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+  <div class="stat-card"><div class="stat-label">Total Active Classes</div><div class="stat-value success">{{ total_active_classes }}</div></div>
+  <div class="stat-card"><div class="stat-label">Upcoming Sessions</div><div class="stat-value">{{ upcoming_sessions_count }}</div></div>
+  <div class="stat-card"><div class="stat-label">Total Enrolled Members</div><div class="stat-value">{{ total_enrolled_members }}</div></div>
+  <div class="stat-card"><div class="stat-label">Today's Scheduled Sessions</div><div class="stat-value">{{ today_sessions_count }}</div></div>
+</section>
+<section class="card">
+  <div class="card-header"><div><h2 class="card-title">Upcoming Class Sessions</h2><p class="card-subtitle">Next scheduled sessions and available seats.</p></div></div>
+  {% if upcoming_sessions %}
+  <div class="table-wrap"><table><thead><tr><th>Class</th><th>Trainer</th><th>Date/Time</th><th>Available Seats</th><th>Status</th></tr></thead><tbody>
+    {% for s in upcoming_sessions %}
+    <tr>
+      <td><a class="table-link" href="{% url 'gym:class_detail' s.gym_class.pk %}">{{ s.gym_class.name }}</a></td>
+      <td>{{ s.trainer.full_name }}</td>
+      <td>{{ s.start_datetime|date:"M d, Y g:i A" }}</td>
+      <td>{{ s.available_seats_value }} / {{ s.capacity }}</td>
+      <td><span class="badge badge-upcoming">{{ s.get_status_display }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}<div class="empty-state"><p class="muted">No upcoming sessions.</p></div>{% endif %}
+</section>
+<style>
+@media (max-width: 1100px) { .stats-grid[style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; } }
+@media (max-width: 640px) { .stats-grid[style*="repeat(4"] { grid-template-columns: 1fr !important; } }
+</style>
+{% endblock %}

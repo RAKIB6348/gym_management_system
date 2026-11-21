@@ -1,0 +1,46 @@
+{% extends 'gym/base.html' %}
+{% block title %}Classes | Gym Management{% endblock %}
+{% block eyebrow %}Class Management{% endblock %}
+{% block page_title %}Classes{% endblock %}
+{% block topbar_actions %}
+<a href="{% url 'gym:class_dashboard' %}" class="btn btn-secondary">Class Dashboard</a>
+<a href="{% url 'gym:weekly_schedule' %}" class="btn btn-secondary">Weekly Schedule</a>
+<a href="{% url 'gym:class_create' %}" class="btn btn-primary">+ Create Class</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Gym Classes</h2><p class="card-subtitle">Manage classes, schedules, and sessions.</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field field-search"><label for="q">Search</label><input id="q" name="q" value="{{ search_query }}" placeholder="Class or trainer"></div>
+      <div class="field"><label for="trainer">Trainer</label><select id="trainer" name="trainer"><option value="">All trainers</option>{% for t in trainers %}<option value="{{ t.pk }}" {% if trainer_filter == t.pk|stringformat:"s" %}selected{% endif %}>{{ t.full_name }}</option>{% endfor %}</select></div>
+      <div class="field field-status"><label for="status">Status</label><select id="status" name="status"><option value="">All statuses</option>{% for v,l in status_choices %}<option value="{{ v }}" {% if status_filter == v %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or status_filter or trainer_filter %}<a href="{% url 'gym:class_list' %}" class="btn btn-secondary">Clear</a>{% endif %}
+    </form>
+  </div>
+  {% if classes %}
+  <div class="table-wrap"><table><thead><tr><th>Class Name</th><th>Trainer</th><th>Duration</th><th>Capacity</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+    {% for c in classes %}
+    <tr>
+      <td><div class="member-name">{{ c.name }}</div><div class="member-sub">{{ c.description|default:"No description"|truncatechars:50 }}</div></td>
+      <td>{{ c.trainer.full_name }}</td>
+      <td>{{ c.duration_minutes }} min</td>
+      <td>{{ c.capacity }}</td>
+      <td><span class="badge badge-{{ c.status }}">{{ c.get_status_display }}</span></td>
+      <td><div class="actions">
+        <a href="{% url 'gym:class_detail' c.pk %}" class="btn btn-secondary btn-sm">View</a>
+        <a href="{% url 'gym:class_edit' c.pk %}" class="btn btn-secondary btn-sm">Edit</a>
+        <a href="{% url 'gym:class_detail' c.pk %}#schedule" class="btn btn-secondary btn-sm">Schedule</a>
+      </div></td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% if is_paginated %}
+  <div class="pagination"><div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div><div class="page-links">{% if page_obj.has_previous %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link disabled">Previous</span>{% endif %}{% if page_obj.has_next %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link disabled">Next</span>{% endif %}</div></div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">📅</div><h3>No classes found</h3><p>Create a class to configure schedules and enroll members.</p><a href="{% url 'gym:class_create' %}" class="btn btn-primary">Create Class</a></div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -738,3 +738,210 @@ class TrainerFeatureTests(TestCase):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 302)
             self.assertIn('/accounts/login/', response.url)
+
+from datetime import datetime, time as dt_time
+from django.utils import timezone as dj_timezone
+from .models import GymClass, ClassSchedule, ClassSession, ClassEnrollment, TrainerAvailability
+
+
+class ClassScheduleFeatureTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='classstaff', password='pass12345', is_staff=True)
+        self.client.force_login(self.staff)
+        self.trainer = Trainer.objects.create(full_name='Class Trainer', phone='900', gender='male', specialization='Yoga', experience_years=3, joining_date=date(2026,1,1), status='active')
+        self.member = Member.objects.create(full_name='Class Member', mobile_number='901', gender='male', joining_date=date(2026,1,1), status='active')
+        # active subscription covering 2026-11
+        self.plan = MembershipPlan.objects.create(name='Month', duration_months=1, price=Decimal('1000.00'), is_active=True)
+        self.sub = MemberSubscription.objects.create(member=self.member, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1000.00'), status='active')
+        # trainer availability Monday 09:00-11:00
+        TrainerAvailability.objects.create(trainer=self.trainer, day_of_week=0, start_time=dt_time(9,0), end_time=dt_time(11,0), is_available=True)
+
+    def create_class(self, **overrides):
+        data = {'name': 'Yoga', 'description': 'Relax', 'trainer': self.trainer, 'capacity': 10, 'duration_minutes': 60, 'status': 'active'}
+        data.update(overrides)
+        return GymClass.objects.create(**data)
+
+    def test_create_gym_class(self):
+        r = self.client.post(reverse('gym:class_create'), {
+            'name': 'HIIT', 'description': 'Hard', 'trainer': self.trainer.pk,
+            'capacity': 15, 'duration_minutes': 45, 'status': 'active'
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(GymClass.objects.filter(name='HIIT').exists())
+
+    def test_edit_gym_class(self):
+        c = self.create_class(name='Old')
+        r = self.client.post(reverse('gym:class_edit', args=[c.pk]), {
+            'name': 'New Name', 'description': 'D', 'trainer': self.trainer.pk,
+            'capacity': 20, 'duration_minutes': 30, 'status': 'active'
+        })
+        self.assertEqual(r.status_code, 302)
+        c.refresh_from_db()
+        self.assertEqual(c.name, 'New Name')
+        self.assertEqual(c.capacity, 20)
+
+    def test_assign_trainer(self):
+        t2 = Trainer.objects.create(full_name='T2', phone='902', gender='female', specialization='Cardio', experience_years=2, joining_date=date(2026,1,1), status='active')
+        c = self.create_class()
+        r = self.client.post(reverse('gym:class_edit', args=[c.pk]), {
+            'name': c.name, 'description': '', 'trainer': t2.pk,
+            'capacity': 10, 'duration_minutes': 60, 'status': 'active'
+        })
+        self.assertEqual(r.status_code, 302)
+        c.refresh_from_db()
+        self.assertEqual(c.trainer, t2)
+
+    def test_configure_weekly_schedule(self):
+        c = self.create_class()
+        r = self.client.post(reverse('gym:class_schedule_add', args=[c.pk]), {
+            'day_of_week': '0', 'start_time': '09:00', 'end_time': '10:00', 'is_active': 'on'
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(ClassSchedule.objects.filter(gym_class=c).count(), 1)
+
+    def test_prevent_trainer_schedule_conflict(self):
+        c1 = self.create_class(name='C1')
+        c2 = self.create_class(name='C2')
+        ClassSchedule.objects.create(gym_class=c1, day_of_week=0, start_time=dt_time(9,0), end_time=dt_time(10,0), is_active=True)
+        r = self.client.post(reverse('gym:class_schedule_add', args=[c2.pk]), {
+            'day_of_week': '0', 'start_time': '09:30', 'end_time': '10:30', 'is_active': 'on'
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(ClassSchedule.objects.filter(gym_class=c2).count(), 0)
+
+    def test_validate_trainer_availability(self):
+        c = self.create_class()
+        # outside availability
+        r = self.client.post(reverse('gym:class_schedule_add', args=[c.pk]), {
+            'day_of_week': '0', 'start_time': '11:00', 'end_time': '12:00', 'is_active': 'on'
+        })
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(ClassSchedule.objects.filter(gym_class=c).count(), 0)
+
+    def test_generate_class_sessions(self):
+        c = self.create_class()
+        ClassSchedule.objects.create(gym_class=c, day_of_week=0, start_time=dt_time(9,0), end_time=dt_time(10,0), is_active=True) # Monday
+        # generate for 14 days from "today" in test; we'll patch localdate
+        with patch('gym.views.timezone.localdate', return_value=date(2026, 11, 16)):  # a Monday
+            r = self.client.post(reverse('gym:class_session_generate', args=[c.pk]), {'days_ahead': 7})
+        self.assertEqual(r.status_code, 302)
+        self.assertTrue(ClassSession.objects.filter(gym_class=c).exists())
+
+    def test_prevent_duplicate_sessions(self):
+        c = self.create_class()
+        ClassSchedule.objects.create(gym_class=c, day_of_week=0, start_time=dt_time(9,0), end_time=dt_time(10,0), is_active=True)
+        with patch('gym.views.timezone.localdate', return_value=date(2026, 11, 16)):
+            self.client.post(reverse('gym:class_session_generate', args=[c.pk]), {'days_ahead': 7})
+            count1 = ClassSession.objects.filter(gym_class=c).count()
+            self.client.post(reverse('gym:class_session_generate', args=[c.pk]), {'days_ahead': 7})
+            count2 = ClassSession.objects.filter(gym_class=c).count()
+        self.assertEqual(count1, count2)
+
+    def make_session(self, gym_class=None, start=None, end=None, capacity=5):
+        gym_class = gym_class or self.create_class()
+        tz = dj_timezone.get_current_timezone()
+        start = start or dj_timezone.make_aware(datetime(2026, 11, 23, 9, 0), tz)
+        end = end or dj_timezone.make_aware(datetime(2026, 11, 23, 10, 0), tz)
+        return ClassSession.objects.create(gym_class=gym_class, schedule=None, trainer=gym_class.trainer, start_datetime=start, end_datetime=end, capacity=capacity, status='scheduled')
+
+    def test_enroll_member(self):
+        c = self.create_class()
+        s = self.make_session(gym_class=c)
+        r = self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': reverse('gym:class_detail', args=[c.pk])})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(ClassEnrollment.objects.filter(session=s, member=self.member, status='enrolled').count(), 1)
+
+    def test_prevent_duplicate_enrollment(self):
+        c = self.create_class()
+        s = self.make_session(gym_class=c)
+        self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': '/'})
+        r = self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': '/'})
+        self.assertEqual(ClassEnrollment.objects.filter(session=s, member=self.member, status='enrolled').count(), 1)
+
+    def test_prevent_capacity_overflow(self):
+        c = self.create_class(capacity=1)
+        s = self.make_session(gym_class=c, capacity=1)
+        m2 = Member.objects.create(full_name='M2', mobile_number='902', gender='female', joining_date=date(2026,1,1), status='active')
+        MemberSubscription.objects.create(member=m2, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1000.00'), status='active')
+        self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': '/'})
+        r = self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': m2.pk, 'next': '/'})
+        self.assertEqual(ClassEnrollment.objects.filter(session=s, status='enrolled').count(), 1)
+
+    def test_reject_expired_membership(self):
+        c = self.create_class()
+        tz = dj_timezone.get_current_timezone()
+        s = self.make_session(gym_class=c, start=dj_timezone.make_aware(datetime(2026, 12, 15, 9, 0), tz), end=dj_timezone.make_aware(datetime(2026, 12, 15, 10, 0), tz))
+        r = self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': '/'})
+        self.assertEqual(ClassEnrollment.objects.filter(session=s, status='enrolled').count(), 0)
+
+    def test_cancel_enrollment(self):
+        c = self.create_class()
+        s = self.make_session(gym_class=c)
+        self.client.post(reverse('gym:class_session_enroll', args=[s.pk]), {'member_id': self.member.pk, 'next': '/'})
+        e = ClassEnrollment.objects.get(session=s, member=self.member)
+        r = self.client.post(reverse('gym:class_enrollment_cancel', args=[e.pk]), {'next': reverse('gym:member_detail', args=[self.member.pk])})
+        self.assertEqual(r.status_code, 302)
+        e.refresh_from_db()
+        self.assertEqual(e.status, 'cancelled')
+
+    def test_verify_member_profile_integration(self):
+        c = self.create_class(name='Yoga Class')
+        s = self.make_session(gym_class=c)
+        ClassEnrollment.objects.create(member=self.member, session=s, status='enrolled')
+        r = self.client.get(reverse('gym:member_detail', args=[self.member.pk]))
+        self.assertContains(r, 'My Classes')
+        self.assertContains(r, 'Yoga Class')
+
+    def test_verify_dashboard_kpi_calculations(self):
+        c = self.create_class()
+        tz = dj_timezone.get_current_timezone()
+        s = ClassSession.objects.create(gym_class=c, schedule=None, trainer=self.trainer, start_datetime=timezone.now() + timedelta(days=1), end_datetime=timezone.now() + timedelta(days=1, hours=1), capacity=10, status='scheduled')
+        ClassEnrollment.objects.create(member=self.member, session=s, status='enrolled')
+        r = self.client.get(reverse('gym:class_dashboard'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['total_active_classes'], 1)
+        self.assertGreaterEqual(r.context['upcoming_sessions_count'], 1)
+        self.assertEqual(r.context['total_enrolled_members'], 1)
+
+    def test_verify_authentication_and_permissions(self):
+        self.client.logout()
+        c = self.create_class()
+        urls = [reverse('gym:class_list'), reverse('gym:class_create'), reverse('gym:class_dashboard'), reverse('gym:weekly_schedule')]
+        for url in urls:
+            r = self.client.get(url)
+            self.assertEqual(r.status_code, 302)
+            self.assertIn('/accounts/login/', r.url)
+
+
+class ClassEnrollmentConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='classcon', password='pass12345', is_staff=True)
+        self.trainer = Trainer.objects.create(full_name='CT', phone='999', gender='male', specialization='S', experience_years=1, joining_date=date(2026,1,1), status='active')
+        self.plan = MembershipPlan.objects.create(name='M', duration_months=1, price=Decimal('1000.00'), is_active=True)
+        self.cls = GymClass.objects.create(name='C', trainer=self.trainer, capacity=1, duration_minutes=60, status='active')
+        tz = dj_timezone.get_current_timezone()
+        self.session_obj = ClassSession.objects.create(gym_class=self.cls, trainer=self.trainer, start_datetime=dj_timezone.make_aware(datetime(2026,11,23,9,0), tz), end_datetime=dj_timezone.make_aware(datetime(2026,11,23,10,0), tz), capacity=1, status='scheduled')
+        self.m1 = Member.objects.create(full_name='M1', mobile_number='1', gender='male', joining_date=date(2026,1,1), status='active')
+        self.m2 = Member.objects.create(full_name='M2', mobile_number='2', gender='female', joining_date=date(2026,1,1), status='active')
+        MemberSubscription.objects.create(member=self.m1, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1000.00'), status='active')
+        MemberSubscription.objects.create(member=self.m2, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1000.00'), status='active')
+
+    def test_prevent_concurrent_overbooking(self):
+        import threading
+        from django.test import Client
+        results = []
+
+        def enroll(member):
+            try:
+                c = Client()
+                c.force_login(self.staff)
+                r = c.post(reverse('gym:class_session_enroll', args=[self.session_obj.pk]), {'member_id': member.pk, 'next': '/'})
+                results.append(r.status_code)
+            except Exception:
+                results.append('err')
+
+        t1 = threading.Thread(target=enroll, args=(self.m1,))
+        t2 = threading.Thread(target=enroll, args=(self.m2,))
+        t1.start(); t2.start(); t1.join(); t2.join()
+        enrolled = ClassEnrollment.objects.filter(session=self.session_obj, status='enrolled').count()
+        self.assertLessEqual(enrolled, 1)

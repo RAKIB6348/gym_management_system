@@ -1,0 +1,103 @@
+{% extends 'gym/base.html' %}
+{% block title %}{{ gym_class.name }} | Gym Management{% endblock %}
+{% block eyebrow %}Class Management{% endblock %}
+{% block page_title %}{{ gym_class.name }}{% endblock %}
+{% block topbar_actions %}
+<a href="{% url 'gym:class_edit' gym_class.pk %}" class="btn btn-secondary">Edit Class</a>
+<form method="post" action="{% url 'gym:class_toggle_status' gym_class.pk %}" class="inline-form">{% csrf_token %}<input type="hidden" name="next" value="{% url 'gym:class_detail' gym_class.pk %}"><button type="submit" class="btn {% if gym_class.status == 'active' %}btn-danger{% else %}btn-success{% endif %}">{% if gym_class.status == 'active' %}Deactivate{% else %}Activate{% endif %}</button></form>
+{% endblock %}
+{% block content %}
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Class Details</h2><p class="card-subtitle">Class configuration and trainer assignment.</p></div><span class="badge badge-{{ gym_class.status }}">{{ gym_class.get_status_display }}</span></div>
+    <div class="card-body"><div class="detail-grid">
+      <div class="detail-item"><div class="meta-label">Class Name</div><div class="meta-value">{{ gym_class.name }}</div></div>
+      <div class="detail-item"><div class="meta-label">Trainer</div><div class="meta-value"><a class="table-link" href="{% url 'gym:trainer_detail' gym_class.trainer.pk %}">{{ gym_class.trainer.full_name }}</a></div></div>
+      <div class="detail-item"><div class="meta-label">Duration</div><div class="meta-value">{{ gym_class.duration_minutes }} minutes</div></div>
+      <div class="detail-item"><div class="meta-label">Capacity</div><div class="meta-value">{{ gym_class.capacity }}</div></div>
+      <div class="detail-item full"><div class="meta-label">Description</div><div class="meta-value">{{ gym_class.description|default:"No description provided."|linebreaksbr }}</div></div>
+    </div></div>
+  </section>
+
+  <section class="card" id="schedule">
+    <div class="card-header"><div><h2 class="card-title">Weekly Schedule</h2><p class="card-subtitle">Recurring schedule validated against trainer availability.</p></div></div>
+    <div class="card-body">
+      <form method="post" action="{% url 'gym:class_schedule_add' gym_class.pk %}" style="margin-bottom:20px;">{% csrf_token %}
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Day *</label>{{ schedule_form.day_of_week }}</div>
+          <div class="form-group"><label class="form-label">Start Time *</label>{{ schedule_form.start_time }}</div>
+          <div class="form-group"><label class="form-label">End Time *</label>{{ schedule_form.end_time }}</div>
+          <div class="form-group"><label class="form-label">Active</label><div style="padding:10px 0;"><label style="display:flex;gap:8px;align-items:center;">{{ schedule_form.is_active }} Active schedule</label></div></div>
+        </div>
+        <div style="margin-top:12px;"><button type="submit" class="btn btn-primary btn-sm">Add Schedule</button></div>
+      </form>
+      {% if schedules %}
+      <div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Status</th><th>Action</th></tr></thead><tbody>
+        {% for sch in schedules %}
+        <tr>
+          <td>{{ sch.get_day_of_week_display }}</td><td>{{ sch.start_time|time:"g:i A" }}</td><td>{{ sch.end_time|time:"g:i A" }}</td>
+          <td>{% if sch.is_active %}<span class="badge badge-active">Active</span>{% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}</td>
+          <td><form method="post" action="{% url 'gym:class_schedule_toggle' sch.pk %}" class="inline-form">{% csrf_token %}<input type="hidden" name="next" value="{% url 'gym:class_detail' gym_class.pk %}"><button type="submit" class="btn btn-secondary btn-sm">{% if sch.is_active %}Deactivate{% else %}Activate{% endif %}</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="muted">No weekly schedules configured.</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Upcoming Sessions</h2><p class="card-subtitle">Generate dated sessions from weekly schedules and manage enrollments.</p></div></div>
+    <div class="card-body">
+      <form method="post" action="{% url 'gym:class_session_generate' gym_class.pk %}" style="margin-bottom:20px; display:flex; gap:12px; align-items:end; flex-wrap:wrap;">{% csrf_token %}
+        <div class="field"><label for="id_days_ahead">Generate next N days</label>{{ generate_form.days_ahead }}</div>
+        <button type="submit" class="btn btn-primary btn-sm">Generate Sessions</button>
+      </form>
+
+      {% if upcoming_sessions %}
+      <div class="table-wrap"><table><thead><tr><th>Date/Time</th><th>Trainer</th><th>Capacity</th><th>Available</th><th>Status</th><th>Enroll Member</th><th>Action</th></tr></thead><tbody>
+        {% for s in upcoming_sessions %}
+        <tr>
+          <td>{{ s.start_datetime|date:"M d, Y g:i A" }} - {{ s.end_datetime|date:"g:i A" }}</td>
+          <td>{{ s.trainer.full_name }}</td>
+          <td>{{ s.enrolled_count_value }}/{{ s.capacity }}</td>
+          <td>{{ s.available_seats_value }}</td>
+          <td><span class="badge {% if s.status == 'scheduled' %}badge-upcoming{% elif s.status == 'completed' %}badge-active{% else %}badge-cancelled{% endif %}">{{ s.get_status_display }}</span></td>
+          <td>
+            {% if s.status == 'scheduled' and s.available_seats_value > 0 %}
+            <form method="post" action="{% url 'gym:class_session_enroll' s.pk %}" class="inline-form" style="display:flex; gap:6px; align-items:center;">{% csrf_token %}
+              <input type="hidden" name="next" value="{% url 'gym:class_detail' gym_class.pk %}">
+              <select name="member_id" required style="max-width:180px; padding:7px; border-radius:8px; border:1px solid #dbe3ee;">
+                <option value="">Select member</option>
+                {% for m in active_members %}<option value="{{ m.pk }}">{{ m.member_id }} - {{ m.full_name }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="btn btn-success btn-sm">Enroll</button>
+            </form>
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td>
+            {% if s.status == 'scheduled' %}
+            <form method="post" action="{% url 'gym:class_session_cancel' s.pk %}" class="inline-form" onsubmit="return confirm('Cancel this session?');">{% csrf_token %}<input type="hidden" name="next" value="{% url 'gym:class_detail' gym_class.pk %}"><button type="submit" class="btn btn-danger btn-sm">Cancel</button></form>
+            {% else %}-{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td colspan="7" style="background:#fbfdff;">
+            <strong>Enrolled Members:</strong>
+            {% if s.enrolled_members_list %}
+              {% for e in s.enrolled_members_list %}
+                <span style="display:inline-block; margin:4px 6px 0 0; padding:4px 8px; background:#eff6ff; border-radius:999px; font-size:0.8rem;">
+                  {{ e.member.member_id }} - {{ e.member.full_name }}
+                </span>
+              {% endfor %}
+            {% else %}
+              <span class="muted">No enrollments yet.</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="muted">No upcoming sessions. Generate sessions from active weekly schedules.</p>{% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

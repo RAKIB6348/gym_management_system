@@ -45,6 +45,10 @@
           <span class="nav-icon">●</span>
           <span>Trainers</span>
         </a>
+        <a href="{% url 'gym:class_list' %}" class="nav-item {% if 'class' in request.resolver_match.url_name or request.resolver_match.url_name == 'weekly_schedule' %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Classes</span>
+        </a>
       </nav>
       <div class="sidebar-footer">
         {% if request.user.is_authenticated %}

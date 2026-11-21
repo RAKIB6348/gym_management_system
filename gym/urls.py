@@ -40,4 +40,18 @@ urlpatterns = [
     path('trainers/availability/<int:pk>/delete/', views.TrainerAvailabilityDeleteView.as_view(), name='trainer_availability_delete'),
     path('trainers/assignments/<int:pk>/end/', views.TrainerAssignmentEndView.as_view(), name='trainer_assignment_end'),
     path('members/<int:member_pk>/assign-trainer/', views.TrainerAssignmentCreateView.as_view(), name='member_assign_trainer'),
+
+    path('classes/', views.GymClassListView.as_view(), name='class_list'),
+    path('classes/dashboard/', views.ClassDashboardView.as_view(), name='class_dashboard'),
+    path('classes/schedule/', views.WeeklyScheduleView.as_view(), name='weekly_schedule'),
+    path('classes/add/', views.GymClassCreateView.as_view(), name='class_create'),
+    path('classes/<int:pk>/', views.GymClassDetailView.as_view(), name='class_detail'),
+    path('classes/<int:pk>/edit/', views.GymClassUpdateView.as_view(), name='class_edit'),
+    path('classes/<int:pk>/toggle-status/', views.GymClassToggleStatusView.as_view(), name='class_toggle_status'),
+    path('classes/<int:class_pk>/schedules/add/', views.ClassScheduleCreateView.as_view(), name='class_schedule_add'),
+    path('classes/schedules/<int:pk>/toggle/', views.ClassScheduleToggleView.as_view(), name='class_schedule_toggle'),
+    path('classes/<int:class_pk>/sessions/generate/', views.ClassSessionGenerateView.as_view(), name='class_session_generate'),
+    path('classes/sessions/<int:pk>/cancel/', views.ClassSessionCancelView.as_view(), name='class_session_cancel'),
+    path('classes/sessions/<int:pk>/enroll/', views.ClassSessionEnrollView.as_view(), name='class_session_enroll'),
+    path('classes/enrollments/<int:pk>/cancel/', views.ClassEnrollmentCancelView.as_view(), name='class_enrollment_cancel'),
 ]

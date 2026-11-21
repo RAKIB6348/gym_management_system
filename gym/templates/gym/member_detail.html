@@ -220,6 +220,55 @@
     <section class="card">
       <div class="card-header">
         <div>
+          <h2 class="card-title">My Classes</h2>
+          <p class="card-subtitle">Upcoming class sessions and enrollment history.</p>
+        </div>
+      </div>
+      <div class="card-body">
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Upcoming Classes</h3>
+        {% if upcoming_class_enrollments %}
+        <div class="table-wrap" style="margin-bottom:24px;"><table><thead><tr><th>Class Name</th><th>Trainer</th><th>Session Date</th><th>Session Time</th><th>Status</th><th>Action</th></tr></thead><tbody>
+          {% for e in upcoming_class_enrollments %}
+          <tr>
+            <td>{{ e.session.gym_class.name }}</td>
+            <td>{{ e.session.trainer.full_name }}</td>
+            <td>{{ e.session.start_datetime|date:"M d, Y" }}</td>
+            <td>{{ e.session.start_datetime|date:"g:i A" }} - {{ e.session.end_datetime|date:"g:i A" }}</td>
+            <td><span class="badge {% if e.status == 'enrolled' %}badge-active{% else %}badge-cancelled{% endif %}">{{ e.get_status_display }}</span></td>
+            <td>
+              {% if e.status == 'enrolled' %}
+              <form method="post" action="{% url 'gym:class_enrollment_cancel' e.pk %}" class="inline-form" onsubmit="return confirm('Cancel this enrollment?');">{% csrf_token %}<input type="hidden" name="next" value="{% url 'gym:member_detail' member.pk %}"><button type="submit" class="btn btn-danger btn-sm">Cancel</button></form>
+              {% else %}-{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}
+        <p class="muted" style="margin-bottom:24px;">No upcoming class enrollments.</p>
+        {% endif %}
+
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Class Enrollment History</h3>
+        {% if class_enrollments %}
+        <div class="table-wrap"><table><thead><tr><th>Class</th><th>Trainer</th><th>Date</th><th>Time</th><th>Status</th></tr></thead><tbody>
+          {% for e in class_enrollments %}
+          <tr>
+            <td>{{ e.session.gym_class.name }}</td>
+            <td>{{ e.session.trainer.full_name }}</td>
+            <td>{{ e.session.start_datetime|date:"M d, Y" }}</td>
+            <td>{{ e.session.start_datetime|date:"g:i A" }}</td>
+            <td><span class="badge {% if e.status == 'enrolled' %}badge-active{% else %}badge-cancelled{% endif %}">{{ e.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}
+        <p class="muted">No class enrollment history.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
           <h2 class="card-title">Payments</h2>
           <p class="card-subtitle">Membership fees, payments, and receipts.</p>
         </div>

@@ -1,0 +1,38 @@
+{% extends 'gym/base.html' %}
+{% block title %}Weekly Schedule | Gym Management{% endblock %}
+{% block eyebrow %}Class Schedule{% endblock %}
+{% block page_title %}Weekly Schedule{% endblock %}
+{% block topbar_actions %}
+<a href="{% url 'gym:class_list' %}" class="btn btn-secondary">Classes</a>
+<a href="{% url 'gym:class_dashboard' %}" class="btn btn-secondary">Class Dashboard</a>
+{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div><h2 class="card-title">Upcoming Week</h2><p class="card-subtitle">{{ week_start|date:"M d, Y" }} - {{ week_end|date:"M d, Y" }}</p></div>
+    <form method="get" class="filter-bar">
+      <div class="field"><label>Trainer</label><select name="trainer"><option value="">All trainers</option>{% for t in trainers %}<option value="{{ t.pk }}" {% if trainer_filter == t.pk|stringformat:"s" %}selected{% endif %}>{{ t.full_name }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Class</label><select name="gym_class"><option value="">All classes</option>{% for c in classes %}<option value="{{ c.pk }}" {% if class_filter == c.pk|stringformat:"s" %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Day</label><select name="day"><option value="">All days</option><option value="0" {% if day_filter == '0' %}selected{% endif %}>Monday</option><option value="1" {% if day_filter == '1' %}selected{% endif %}>Tuesday</option><option value="2" {% if day_filter == '2' %}selected{% endif %}>Wednesday</option><option value="3" {% if day_filter == '3' %}selected{% endif %}>Thursday</option><option value="4" {% if day_filter == '4' %}selected{% endif %}>Friday</option><option value="5" {% if day_filter == '5' %}selected{% endif %}>Saturday</option><option value="6" {% if day_filter == '6' %}selected{% endif %}>Sunday</option></select></div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+    </form>
+  </div>
+  {% if sessions %}
+  <div class="table-wrap"><table><thead><tr><th>Day</th><th>Class Name</th><th>Trainer</th><th>Start Time</th><th>End Time</th><th>Available Seats</th><th>Status</th></tr></thead><tbody>
+    {% for s in sessions %}
+    <tr>
+      <td>{{ s.start_datetime|date:"D, M d" }}</td>
+      <td><a class="table-link" href="{% url 'gym:class_detail' s.gym_class.pk %}">{{ s.gym_class.name }}</a></td>
+      <td>{{ s.trainer.full_name }}</td>
+      <td>{{ s.start_datetime|date:"g:i A" }}</td>
+      <td>{{ s.end_datetime|date:"g:i A" }}</td>
+      <td>{{ s.available_seats_value }} / {{ s.capacity }}</td>
+      <td><span class="badge {% if s.status == 'scheduled' %}badge-upcoming{% elif s.status == 'completed' %}badge-active{% else %}badge-cancelled{% endif %}">{{ s.get_status_display }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody></table></div>
+  {% else %}
+  <div class="empty-state"><div class="empty-icon">🗓️</div><h3>No sessions found</h3><p>Generate sessions from class schedules to populate the weekly calendar.</p></div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends 'gym/base.html' %}
+{% block title %}{% if object %}Edit Class{% else %}Create Class{% endif %} | Gym Management{% endblock %}
+{% block eyebrow %}Class Management{% endblock %}
+{% block page_title %}{% if object %}Edit Class{% else %}Create Class{% endif %}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="card-header"><div><h2 class="card-title">{% if object %}Update class{% else %}New class{% endif %}</h2><p class="card-subtitle">Set class details, trainer, and capacity.</p></div></div>
+  <div class="card-body">
+    <form method="post" novalidate>{% csrf_token %}
+      {% if form.non_field_errors %}<div class="alert alert-error" style="margin-bottom:20px;">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="form-grid">
+        <div class="form-group {% if form.name.errors %}field-errors{% endif %}"><label class="form-label">Class Name *</label>{{ form.name }}{% for e in form.name.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.trainer.errors %}field-errors{% endif %}"><label class="form-label">Trainer *</label>{{ form.trainer }}{% for e in form.trainer.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.capacity.errors %}field-errors{% endif %}"><label class="form-label">Capacity *</label>{{ form.capacity }}{% for e in form.capacity.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.duration_minutes.errors %}field-errors{% endif %}"><label class="form-label">Duration (minutes) *</label>{{ form.duration_minutes }}{% for e in form.duration_minutes.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.status.errors %}field-errors{% endif %}"><label class="form-label">Status *</label>{{ form.status }}{% for e in form.status.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group full {% if form.description.errors %}field-errors{% endif %}"><label class="form-label">Description</label>{{ form.description }}{% for e in form.description.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+      </div>
+      <div class="form-actions">
+        <a href="{% if object %}{% url 'gym:class_detail' object.pk %}{% else %}{% url 'gym:class_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary">{% if object %}Save Changes{% else %}Create Class{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

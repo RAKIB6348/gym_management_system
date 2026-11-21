@@ -1,5 +1,5 @@
 import calendar
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -488,6 +488,234 @@ class TrainerAvailability(models.Model):
             qs = qs.filter(start_time__lt=self.end_time, end_time__gt=self.start_time)
             if qs.exists():
                 raise ValidationError('This availability slot overlaps an existing slot for the same trainer.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class GymClass(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        INACTIVE = 'inactive', 'Inactive'
+
+    name = models.CharField(max_length=120)
+    description = models.TextField(blank=True)
+    trainer = models.ForeignKey(Trainer, on_delete=models.PROTECT, related_name='gym_classes')
+    capacity = models.PositiveIntegerField()
+    duration_minutes = models.PositiveIntegerField()
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        errors = {}
+        if self.capacity is not None and self.capacity < 1:
+            errors['capacity'] = 'Capacity must be at least 1.'
+        if self.duration_minutes is not None and self.duration_minutes < 1:
+            errors['duration_minutes'] = 'Duration must be at least 1 minute.'
+        if self.trainer_id and self.trainer.status != Trainer.Status.ACTIVE and self.status == self.Status.ACTIVE:
+            # Allow keeping existing inactive assignment? New/active classes should have active trainer.
+            if not self.pk:
+                errors['trainer'] = 'Trainer must be active.'
+        if errors:
+            raise ValidationError(errors)
+
+
+class ClassSchedule(models.Model):
+    class DayOfWeek(models.IntegerChoices):
+        MONDAY = 0, 'Monday'
+        TUESDAY = 1, 'Tuesday'
+        WEDNESDAY = 2, 'Wednesday'
+        THURSDAY = 3, 'Thursday'
+        FRIDAY = 4, 'Friday'
+        SATURDAY = 5, 'Saturday'
+        SUNDAY = 6, 'Sunday'
+
+    gym_class = models.ForeignKey(GymClass, on_delete=models.PROTECT, related_name='schedules')
+    day_of_week = models.IntegerField(choices=DayOfWeek.choices)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['day_of_week', 'start_time']
+
+    def __str__(self):
+        return f'{self.gym_class.name} - {self.get_day_of_week_display()} {self.start_time}-{self.end_time}'
+
+    def clean(self):
+        errors = {}
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            errors['end_time'] = 'End time must be after start time.'
+        if errors:
+            raise ValidationError(errors)
+
+        if not self.gym_class_id or not self.start_time or not self.end_time:
+            return
+
+        trainer = self.gym_class.trainer
+        if trainer.status != Trainer.Status.ACTIVE and self.is_active:
+            raise ValidationError('Trainer must be active for an active schedule.')
+
+        # Validate against trainer availability - there must be an available slot covering this schedule
+        availability_qs = TrainerAvailability.objects.filter(
+            trainer=trainer, day_of_week=self.day_of_week, is_available=True,
+            start_time__lte=self.start_time, end_time__gte=self.end_time,
+        )
+        if not availability_qs.exists():
+            raise ValidationError('Schedule must be within the trainer\'s available time slots.')
+
+        # Prevent overlapping active schedules for same trainer
+        overlapping = ClassSchedule.objects.filter(
+            gym_class__trainer=trainer,
+            day_of_week=self.day_of_week,
+            is_active=True,
+        ).exclude(pk=self.pk)
+        if self.pk:
+            overlapping = overlapping.exclude(pk=self.pk)
+        overlapping = overlapping.filter(start_time__lt=self.end_time, end_time__gt=self.start_time)
+        if overlapping.exists():
+            raise ValidationError('This schedule overlaps another active session for the same trainer.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class ClassSession(models.Model):
+    class Status(models.TextChoices):
+        SCHEDULED = 'scheduled', 'Scheduled'
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    gym_class = models.ForeignKey(GymClass, on_delete=models.PROTECT, related_name='sessions')
+    schedule = models.ForeignKey(ClassSchedule, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
+    trainer = models.ForeignKey(Trainer, on_delete=models.PROTECT, related_name='class_sessions')
+    start_datetime = models.DateTimeField()
+    end_datetime = models.DateTimeField()
+    capacity = models.PositiveIntegerField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['start_datetime']
+        indexes = [
+            models.Index(fields=['start_datetime']),
+            models.Index(fields=['status']),
+            models.Index(fields=['trainer', 'start_datetime']),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=['schedule', 'start_datetime'], name='unique_schedule_session_start')
+        ]
+
+    def __str__(self):
+        return f'{self.gym_class.name} @ {self.start_datetime}'
+
+    def clean(self):
+        errors = {}
+        if self.start_datetime and self.end_datetime and self.end_datetime <= self.start_datetime:
+            errors['end_datetime'] = 'End datetime must be after start datetime.'
+        if self.capacity is not None and self.capacity < 1:
+            errors['capacity'] = 'Capacity must be at least 1.'
+        if errors:
+            raise ValidationError(errors)
+
+        if self.trainer_id and self.start_datetime and self.end_datetime and self.status == self.Status.SCHEDULED:
+            qs = ClassSession.objects.filter(
+                trainer_id=self.trainer_id,
+                status=self.Status.SCHEDULED,
+                start_datetime__lt=self.end_datetime,
+                end_datetime__gt=self.start_datetime,
+            )
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError('This session overlaps another scheduled session for the same trainer.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    @property
+    def enrolled_count(self):
+        return self.enrollments.filter(status=ClassEnrollment.Status.ENROLLED).count()
+
+    @property
+    def available_seats(self):
+        remaining = self.capacity - self.enrolled_count
+        return remaining if remaining > 0 else 0
+
+
+class ClassEnrollment(models.Model):
+    class Status(models.TextChoices):
+        ENROLLED = 'enrolled', 'Enrolled'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    member = models.ForeignKey(Member, on_delete=models.PROTECT, related_name='class_enrollments')
+    session = models.ForeignKey(ClassSession, on_delete=models.PROTECT, related_name='enrollments')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ENROLLED)
+    enrolled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-enrolled_at']
+        indexes = [
+            models.Index(fields=['member', 'status']),
+            models.Index(fields=['session', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.member.member_id} - {self.session} ({self.status})'
+
+    def clean(self):
+        errors = {}
+        if self.member_id and self.member.status != Member.Status.ACTIVE:
+            errors['member'] = 'Inactive members cannot be enrolled.'
+        if self.session_id and self.session.status != ClassSession.Status.SCHEDULED:
+            errors['session'] = 'Only scheduled sessions can be enrolled.'
+        if errors:
+            raise ValidationError(errors)
+
+        if self.status == self.Status.ENROLLED and self.member_id and self.session_id:
+            dup = ClassEnrollment.objects.filter(member_id=self.member_id, session_id=self.session_id, status=self.Status.ENROLLED)
+            if self.pk:
+                dup = dup.exclude(pk=self.pk)
+            if dup.exists():
+                raise ValidationError('Member is already enrolled in this session.')
+
+            # valid membership covering session date
+            session_date = timezone.localdate(self.session.start_datetime) if timezone.is_aware(self.session.start_datetime) else self.session.start_datetime.date()
+            has_membership = MemberSubscription.objects.filter(
+                member_id=self.member_id,
+                start_date__lte=session_date,
+                end_date__gte=session_date,
+            ).exclude(status=MemberSubscription.Status.CANCELLED).exists()
+            # also ensure computed status is active/upcoming? covering date means active on that date
+            if not has_membership:
+                # check by date coverage independent of stored status except cancelled
+                raise ValidationError('Member must have a valid membership covering the session date.')
+
+            # overlapping booking for same member
+            overlapping = ClassEnrollment.objects.filter(
+                member_id=self.member_id,
+                status=self.Status.ENROLLED,
+                session__status=ClassSession.Status.SCHEDULED,
+                session__start_datetime__lt=self.session.end_datetime,
+                session__end_datetime__gt=self.session.start_datetime,
+            )
+            if self.pk:
+                overlapping = overlapping.exclude(pk=self.pk)
+            if overlapping.exists():
+                raise ValidationError('Member already has an overlapping class booking.')
 
     def save(self, *args, **kwargs):
         self.full_clean()
