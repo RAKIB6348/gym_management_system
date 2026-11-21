@@ -1,0 +1,89 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Subscriptions | Gym Management{% endblock %}
+{% block eyebrow %}Membership Subscriptions{% endblock %}
+{% block page_title %}Subscriptions{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Member Subscriptions</h2>
+      <p class="card-subtitle">Track membership validity, status, and renewals.</p>
+    </div>
+    <form method="get" class="filter-bar" aria-label="Filter subscriptions">
+      <div class="field field-search">
+        <label for="q">Search</label>
+        <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Search member, ID, or plan">
+      </div>
+      <div class="field field-status">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All statuses</option>
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or status_filter %}<a href="{% url 'gym:subscription_list' %}" class="btn btn-secondary">Clear</a>{% endif %}
+    </form>
+  </div>
+
+  {% if subscriptions %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Member ID</th>
+          <th>Member Name</th>
+          <th>Plan</th>
+          <th>Start Date</th>
+          <th>Expiry Date</th>
+          <th>Current Status</th>
+          <th>Renewal Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for sub in subscriptions %}
+        <tr>
+          <td><a class="table-link" href="{% url 'gym:member_detail' sub.member.pk %}">{{ sub.member.member_id }}</a></td>
+          <td>{{ sub.member.full_name }}</td>
+          <td>{{ sub.plan.name }}</td>
+          <td>{{ sub.start_date|date:"M d, Y" }}</td>
+          <td>{{ sub.end_date|date:"M d, Y" }}</td>
+          <td><span class="badge badge-{{ sub.display_status }}">{{ sub.display_status|capfirst }}</span></td>
+          <td>
+            <a href="{% url 'gym:subscription_renew' sub.member.pk sub.pk %}" class="btn btn-secondary btn-sm">Renew</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if is_paginated %}
+  <div class="pagination">
+    <div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &middot; {{ page_obj.paginator.count }} subscription{{ page_obj.paginator.count|pluralize }}</div>
+    <div class="page-links">
+      {% if page_obj.has_previous %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link disabled">Previous</span>{% endif %}
+      {% for num in page_obj.paginator.page_range %}
+        {% if num == page_obj.number %}<span class="page-link active">{{ num }}</span>
+        {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+        <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if page_obj.has_next %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link disabled">Next</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">🗂️</div>
+    <h3>No subscriptions found</h3>
+    <p>{% if search_query or status_filter %}Try adjusting your search or filter.{% else %}Assign a membership plan from a member profile to create subscriptions.{% endif %}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,136 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{% if is_renewal %}Renew Membership{% else %}Assign Membership{% endif %} | Gym Management{% endblock %}
+{% block eyebrow %}Membership{% endblock %}
+{% block page_title %}{% if is_renewal %}Renew Membership{% else %}Assign Membership Plan{% endif %}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Back to Profile</a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">{% if is_renewal %}Renew membership for {{ member.full_name }}{% else %}Assign plan to {{ member.full_name }}{% endif %}</h2>
+      <p class="card-subtitle">Member: {{ member.member_id }} - {{ member.full_name }}. Price is captured at assignment time.</p>
+    </div>
+  </div>
+  <div class="card-body">
+    <form method="post" novalidate id="subscription-form">
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-error" style="margin-bottom: 20px;">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Member</label>
+          <input type="text" class="form-control" value="{{ member.member_id }} - {{ member.full_name }}" disabled>
+          <div class="form-help">Member is automatically selected.</div>
+        </div>
+
+        <div class="form-group {% if form.plan.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.plan.id_for_label }}">Membership Plan *</label>
+          {{ form.plan }}
+          {% for error in form.plan.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Plan Price (BDT)</label>
+          <input type="text" id="plan-price-display" class="form-control" value="Select a plan" readonly>
+          <div class="form-help">Automatically displayed from the selected plan.</div>
+        </div>
+
+        <div class="form-group {% if form.start_date.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.start_date.id_for_label }}">Start Date *</label>
+          {{ form.start_date }}
+          {% for error in form.start_date.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">End Date</label>
+          <input type="text" id="end-date-display" class="form-control" value="Select plan and start date" readonly>
+          <div class="form-help">Automatically calculated from plan duration (calendar months).</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Calculated Validity</label>
+          <input type="text" id="validity-display" class="form-control" value="-" readonly>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary">{% if is_renewal %}Confirm Renewal{% else %}Confirm Assignment{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  const plans = {
+    {% for plan in plans %}
+    "{{ plan.pk }}": { price: "{{ plan.price }}", duration: {{ plan.duration_months }}, name: "{{ plan.name|escapejs }}" },
+    {% endfor %}
+  };
+
+  function addCalendarMonths(dateStr, months) {
+    const parts = dateStr.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) return null;
+    const [year, month, day] = parts;
+    const targetMonthIndex = (month - 1) + months;
+    const targetYear = year + Math.floor(targetMonthIndex / 12);
+    const targetMonth = ((targetMonthIndex % 12) + 12) % 12;
+    const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+    if (day > lastDay) {
+      return new Date(targetYear, targetMonth, lastDay);
+    }
+    const target = new Date(targetYear, targetMonth, day);
+    target.setDate(target.getDate() - 1);
+    return target;
+  }
+
+  function formatDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function updateCalculated() {
+    const planId = document.getElementById('{{ form.plan.id_for_label }}').value;
+    const startDate = document.getElementById('{{ form.start_date.id_for_label }}').value;
+    const priceDisplay = document.getElementById('plan-price-display');
+    const endDisplay = document.getElementById('end-date-display');
+    const validityDisplay = document.getElementById('validity-display');
+
+    if (!planId || !plans[planId]) {
+      priceDisplay.value = 'Select a plan';
+      endDisplay.value = 'Select plan and start date';
+      validityDisplay.value = '-';
+      return;
+    }
+    const plan = plans[planId];
+    priceDisplay.value = 'BDT ' + parseFloat(plan.price).toFixed(2);
+
+    if (!startDate) {
+      endDisplay.value = 'Select start date';
+      validityDisplay.value = plan.duration + ' month(s)';
+      return;
+    }
+    const end = addCalendarMonths(startDate, plan.duration);
+    if (!end) {
+      endDisplay.value = 'Invalid start date';
+      validityDisplay.value = '-';
+      return;
+    }
+    endDisplay.value = formatDate(end);
+    validityDisplay.value = startDate + ' to ' + formatDate(end) + ' (' + plan.duration + ' month' + (plan.duration === 1 ? '' : 's') + ')';
+  }
+
+  document.getElementById('{{ form.plan.id_for_label }}').addEventListener('change', updateCalculated);
+  document.getElementById('{{ form.start_date.id_for_label }}').addEventListener('change', updateCalculated);
+  updateCalculated();
+</script>
+{% endblock %}

@@ -1,0 +1,105 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Membership Plans | Gym Management{% endblock %}
+{% block eyebrow %}Membership Plans{% endblock %}
+{% block page_title %}Plans{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:plan_create' %}" class="btn btn-primary">+ Create Plan</a>
+{% endblock %}
+
+{% block content %}
+<section class="card" style="margin-bottom: 24px;">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Plan Directory</h2>
+      <p class="card-subtitle">Manage membership plans and pricing in BDT.</p>
+    </div>
+    <form method="get" class="filter-bar" aria-label="Filter plans">
+      <div class="field field-search">
+        <label for="q">Search</label>
+        <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Search by plan name or description">
+      </div>
+      <div class="field field-status">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All statuses</option>
+          <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or status_filter %}
+      <a href="{% url 'gym:plan_list' %}" class="btn btn-secondary">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+</section>
+
+{% if plans %}
+<div class="plan-grid">
+  {% for plan in plans %}
+  <article class="card plan-card">
+    <div class="plan-card-header">
+      <div>
+        <h3 class="plan-name">{{ plan.name }}</h3>
+        <div class="plan-meta">{{ plan.duration_label }}</div>
+      </div>
+      {% if plan.is_active %}
+      <span class="badge badge-active">Active</span>
+      {% else %}
+      <span class="badge badge-inactive">Inactive</span>
+      {% endif %}
+    </div>
+    <div class="plan-price">BDT {{ plan.price|floatformat:2 }}</div>
+    <div class="plan-description">{{ plan.description|default:"No description provided." }}</div>
+    <div class="plan-actions">
+      <a href="{% url 'gym:plan_detail' plan.pk %}" class="btn btn-secondary btn-sm">View</a>
+      <a href="{% url 'gym:plan_edit' plan.pk %}" class="btn btn-secondary btn-sm">Edit</a>
+      <form method="post" action="{% url 'gym:plan_toggle_status' plan.pk %}" class="inline-form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        {% if plan.is_active %}
+        <button type="submit" class="btn btn-danger btn-sm">Deactivate</button>
+        {% else %}
+        <button type="submit" class="btn btn-success btn-sm">Activate</button>
+        {% endif %}
+      </form>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+
+{% if is_paginated %}
+<section class="card" style="margin-top: 24px;">
+  <div class="pagination" style="border-top: 0;">
+    <div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &middot; {{ page_obj.paginator.count }} plan{{ page_obj.paginator.count|pluralize }}</div>
+    <div class="page-links">
+      {% if page_obj.has_previous %}
+      <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>
+      {% else %}<span class="page-link disabled">Previous</span>{% endif %}
+      {% for num in page_obj.paginator.page_range %}
+        {% if num == page_obj.number %}<span class="page-link active">{{ num }}</span>
+        {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+        <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if page_obj.has_next %}
+      <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>
+      {% else %}<span class="page-link disabled">Next</span>{% endif %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% else %}
+<section class="card">
+  <div class="empty-state">
+    <div class="empty-icon">📋</div>
+    <h3>No membership plans found</h3>
+    <p>{% if search_query or status_filter %}Try adjusting your search or filter.{% else %}Create your first membership plan to start assigning subscriptions.{% endif %}</p>
+    <a href="{% url 'gym:plan_create' %}" class="btn btn-primary">Create Plan</a>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

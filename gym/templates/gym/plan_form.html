@@ -1,0 +1,70 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{% if object %}Edit Plan{% else %}Create Plan{% endif %} | Gym Management{% endblock %}
+{% block eyebrow %}Membership Plans{% endblock %}
+{% block page_title %}{% if object %}Edit Plan{% else %}Create Membership Plan{% endif %}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% if object %}{% url 'gym:plan_detail' object.pk %}{% else %}{% url 'gym:plan_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">{% if object %}Update plan details{% else %}Plan details{% endif %}</h2>
+      <p class="card-subtitle">Configure pricing and duration. Prices are displayed in BDT.</p>
+    </div>
+  </div>
+  <div class="card-body">
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-error" style="margin-bottom: 20px;">{{ form.non_field_errors }}</div>
+      {% endif %}
+
+      <div class="form-grid">
+        <div class="form-group {% if form.name.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.name.id_for_label }}">Plan Name *</label>
+          {{ form.name }}
+          {% for error in form.name.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.duration_months.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.duration_months.id_for_label }}">Duration (months) *</label>
+          {{ form.duration_months }}
+          <div class="form-help">Examples: 1 monthly, 3 quarterly, 6 half-yearly, 12 yearly. Custom durations are allowed.</div>
+          {% for error in form.duration_months.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.price.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.price.id_for_label }}">Price (BDT) *</label>
+          {{ form.price }}
+          {% for error in form.price.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.is_active.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.is_active.id_for_label }}">Status</label>
+          <div style="padding: 10px 0;">
+            <label style="display:flex; gap:10px; align-items:center; font-weight:500;">
+              {{ form.is_active }} Active plan (available for new subscriptions)
+            </label>
+          </div>
+          {% for error in form.is_active.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group full {% if form.description.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.description.id_for_label }}">Description</label>
+          {{ form.description }}
+          {% for error in form.description.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <a href="{% if object %}{% url 'gym:plan_detail' object.pk %}{% else %}{% url 'gym:plan_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary">{% if object %}Save Changes{% else %}Create Plan{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

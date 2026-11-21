@@ -5,7 +5,8 @@
 {% block page_title %}{{ member.full_name }}{% endblock %}
 
 {% block topbar_actions %}
-<a href="{% url 'gym:member_edit' member.pk %}" class="btn btn-primary">Edit Profile</a>
+<a href="{% url 'gym:subscription_assign' member.pk %}" class="btn btn-primary">Assign Membership Plan</a>
+<a href="{% url 'gym:member_edit' member.pk %}" class="btn btn-secondary">Edit Profile</a>
 <form method="post" action="{% url 'gym:member_toggle_status' member.pk %}" class="inline-form">
   {% csrf_token %}
   <input type="hidden" name="next" value="{% url 'gym:member_detail' member.pk %}">
@@ -80,6 +81,98 @@
             <div class="meta-value">{{ member.joining_date|date:"F d, Y" }}</div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <h2 class="card-title">Membership</h2>
+          <p class="card-subtitle">Current plan, validity, and subscription history.</p>
+        </div>
+        <div class="section-actions">
+          <a href="{% url 'gym:subscription_assign' member.pk %}" class="btn btn-secondary btn-sm">Assign Membership Plan</a>
+          {% if current_subscription %}
+          <a href="{% url 'gym:subscription_renew' member.pk current_subscription.pk %}" class="btn btn-primary btn-sm">Renew Membership</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-body">
+        {% if current_subscription %}
+        <div class="detail-grid" style="margin-bottom: 24px;">
+          <div class="detail-item">
+            <div class="meta-label">Current Plan</div>
+            <div class="meta-value">{{ current_subscription.plan.name }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Membership Validity</div>
+            <div class="meta-value">{{ current_subscription.start_date|date:"M d, Y" }} - {{ current_subscription.end_date|date:"M d, Y" }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Expiry Date</div>
+            <div class="meta-value">{{ current_subscription.end_date|date:"F d, Y" }}</div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Current Status</div>
+            <div class="meta-value"><span class="badge badge-{{ current_subscription.display_status }}">{{ current_subscription.display_status|capfirst }}</span></div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Days Remaining</div>
+            <div class="meta-value">
+              {% if current_subscription.display_status == 'active' %}
+                {{ current_subscription.days_remaining_value }} day{{ current_subscription.days_remaining_value|pluralize }}
+              {% elif current_subscription.display_status == 'upcoming' %}
+                Starts in {{ current_subscription.days_remaining_value }} day{{ current_subscription.days_remaining_value|pluralize }}
+              {% else %}
+                0 days
+              {% endif %}
+            </div>
+          </div>
+          <div class="detail-item">
+            <div class="meta-label">Price at Subscription</div>
+            <div class="meta-value">BDT {{ current_subscription.price_at_subscription|floatformat:2 }}</div>
+          </div>
+        </div>
+        {% else %}
+        <div class="empty-state" style="padding: 24px 0;">
+          <div class="empty-icon">💳</div>
+          <h3>No membership assigned</h3>
+          <p>Assign a membership plan to track validity and renewals.</p>
+          <a href="{% url 'gym:subscription_assign' member.pk %}" class="btn btn-primary">Assign Membership Plan</a>
+        </div>
+        {% endif %}
+
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Subscription History</h3>
+        {% if subscriptions %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Plan</th>
+                <th>Start Date</th>
+                <th>Expiry Date</th>
+                <th>Price (BDT)</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for sub in subscriptions %}
+              <tr>
+                <td>{{ sub.plan.name }}</td>
+                <td>{{ sub.start_date|date:"M d, Y" }}</td>
+                <td>{{ sub.end_date|date:"M d, Y" }}</td>
+                <td>BDT {{ sub.price_at_subscription|floatformat:2 }}</td>
+                <td><span class="badge badge-{{ sub.display_status }}">{{ sub.display_status|capfirst }}</span></td>
+                <td><a href="{% url 'gym:subscription_renew' member.pk sub.pk %}" class="btn btn-secondary btn-sm">Renew</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="muted">No subscription history yet.</p>
+        {% endif %}
       </div>
     </section>
 

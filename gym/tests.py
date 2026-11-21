@@ -168,3 +168,194 @@ class MemberFeatureTests(TestCase):
         fetched = Member.objects.get(pk=member.pk)
         self.assertEqual(fetched.email, 'persist@example.com')
         self.assertEqual(fetched.address, '789 Pine Rd')
+
+from datetime import timedelta
+from decimal import Decimal
+from unittest.mock import patch
+
+from django.utils import timezone
+
+from .models import MembershipPlan, MemberSubscription, calculate_subscription_end_date
+
+
+class MembershipPlanSubscriptionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='staff2', password='pass12345')
+        self.client.force_login(self.user)
+        self.member = Member.objects.create(
+            full_name='Test Member',
+            mobile_number='+15550001111',
+            gender=Member.Gender.MALE,
+            joining_date=date(2026, 1, 1),
+            status=Member.Status.ACTIVE,
+        )
+
+    def create_plan(self, **overrides):
+        data = {
+            'name': 'Monthly Plan',
+            'description': 'Basic plan',
+            'duration_months': 1,
+            'price': Decimal('1500.00'),
+            'is_active': True,
+        }
+        data.update(overrides)
+        return MembershipPlan.objects.create(**data)
+
+    def test_create_monthly_plan(self):
+        response = self.client.post(reverse('gym:plan_create'), {
+            'name': 'Monthly',
+            'description': 'Monthly plan',
+            'duration_months': 1,
+            'price': '1500.00',
+            'is_active': 'on',
+        })
+        self.assertEqual(response.status_code, 302)
+        plan = MembershipPlan.objects.get(name='Monthly')
+        self.assertEqual(plan.duration_months, 1)
+        self.assertEqual(plan.price, Decimal('1500.00'))
+
+    def test_create_yearly_plan(self):
+        response = self.client.post(reverse('gym:plan_create'), {
+            'name': 'Yearly',
+            'description': 'Yearly plan',
+            'duration_months': 12,
+            'price': '12000.00',
+            'is_active': 'on',
+        })
+        self.assertEqual(response.status_code, 302)
+        plan = MembershipPlan.objects.get(name='Yearly')
+        self.assertEqual(plan.duration_months, 12)
+        self.assertEqual(plan.price, Decimal('12000.00'))
+
+    def test_edit_plan_price(self):
+        plan = self.create_plan(name='Editable', price=Decimal('1000.00'))
+        response = self.client.post(reverse('gym:plan_edit', args=[plan.pk]), {
+            'name': 'Editable',
+            'description': 'Updated',
+            'duration_months': 1,
+            'price': '1800.00',
+            'is_active': 'on',
+        })
+        self.assertEqual(response.status_code, 302)
+        plan.refresh_from_db()
+        self.assertEqual(plan.price, Decimal('1800.00'))
+
+    def test_assign_plan_to_member(self):
+        plan = self.create_plan()
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 21)):
+            response = self.client.post(reverse('gym:subscription_assign', args=[self.member.pk]), {
+                'plan': plan.pk,
+                'start_date': '2026-11-21',
+            })
+        self.assertEqual(response.status_code, 302)
+        sub = MemberSubscription.objects.get(member=self.member)
+        self.assertEqual(sub.plan, plan)
+        self.assertEqual(sub.price_at_subscription, Decimal('1500.00'))
+
+    def test_verify_automatic_expiry_date(self):
+        plan = self.create_plan(duration_months=1)
+        # End-of-month handling: Jan 31 + 1 month => Feb 28 (last valid day)
+        end = calculate_subscription_end_date(date(2026, 1, 31), 1)
+        self.assertEqual(end, date(2026, 2, 28))
+        # Regular case
+        self.assertEqual(calculate_subscription_end_date(date(2026, 11, 1), 1), date(2026, 11, 30))
+        # Yearly
+        self.assertEqual(calculate_subscription_end_date(date(2026, 1, 1), 12), date(2026, 12, 31))
+
+    def test_verify_active_membership(self):
+        plan = self.create_plan()
+        sub = MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 30), price_at_subscription=plan.price,
+            status=MemberSubscription.Status.ACTIVE,
+        )
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 21)):
+            self.assertEqual(sub.current_status(), MemberSubscription.Status.ACTIVE)
+
+    def test_verify_expired_membership(self):
+        plan = self.create_plan()
+        sub = MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 31), price_at_subscription=plan.price,
+            status=MemberSubscription.Status.ACTIVE,
+        )
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 21)):
+            self.assertEqual(sub.current_status(), MemberSubscription.Status.EXPIRED)
+
+    def test_renew_existing_membership(self):
+        plan = self.create_plan(duration_months=1)
+        existing = MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 30), price_at_subscription=plan.price,
+            status=MemberSubscription.Status.ACTIVE,
+        )
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 21)):
+            response = self.client.post(
+                reverse('gym:subscription_renew', args=[self.member.pk, existing.pk]),
+                {'plan': plan.pk, 'start_date': '2026-12-01'},
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MemberSubscription.objects.filter(member=self.member).count(), 2)
+        renewed = MemberSubscription.objects.exclude(pk=existing.pk).get()
+        self.assertEqual(renewed.start_date, date(2026, 12, 1))
+        self.assertEqual(renewed.end_date, date(2026, 12, 31))
+        existing.refresh_from_db()
+        self.assertEqual(existing.start_date, date(2026, 11, 1))  # history preserved
+
+    def test_prevent_overlapping_subscriptions(self):
+        plan = self.create_plan(duration_months=1)
+        MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 30), price_at_subscription=plan.price,
+            status=MemberSubscription.Status.ACTIVE,
+        )
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 15)):
+            response = self.client.post(reverse('gym:subscription_assign', args=[self.member.pk]), {
+                'plan': plan.pk,
+                'start_date': '2026-11-15',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MemberSubscription.objects.filter(member=self.member).count(), 1)
+        self.assertContains(response, 'overlaps')
+
+    def test_verify_member_subscription_history(self):
+        plan = self.create_plan(duration_months=1)
+        MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 30), price_at_subscription=Decimal('1200.00'),
+            status=MemberSubscription.Status.EXPIRED,
+        )
+        MemberSubscription.objects.create(
+            member=self.member, plan=plan, start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 31), price_at_subscription=Decimal('1300.00'),
+            status=MemberSubscription.Status.EXPIRED,
+        )
+        response = self.client.get(reverse('gym:member_detail', args=[self.member.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Subscription History')
+        self.assertContains(response, 'BDT 1200.00')
+        self.assertContains(response, 'BDT 1300.00')
+
+    def test_verify_deactivated_plan_restrictions(self):
+        plan = self.create_plan(is_active=False)
+        with patch('django.utils.timezone.localdate', return_value=date(2026, 11, 21)):
+            response = self.client.post(reverse('gym:subscription_assign', args=[self.member.pk]), {
+                'plan': plan.pk,
+                'start_date': '2026-11-21',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MemberSubscription.objects.filter(member=self.member).count(), 0)
+
+    def test_verify_authentication_and_permissions(self):
+        self.client.logout()
+        plan = self.create_plan()
+        urls = [
+            reverse('gym:plan_list'),
+            reverse('gym:plan_create'),
+            reverse('gym:subscription_list'),
+            reverse('gym:subscription_assign', args=[self.member.pk]),
+        ]
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('/accounts/login/', response.url)

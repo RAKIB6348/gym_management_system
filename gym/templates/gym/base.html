@@ -21,9 +21,17 @@
         </div>
       </div>
       <nav class="sidebar-nav">
-        <a href="{% url 'gym:member_list' %}" class="nav-item {% if request.resolver_match.url_name == 'member_list' or request.resolver_match.url_name == 'member_detail' or request.resolver_match.url_name == 'member_create' or request.resolver_match.url_name == 'member_edit' %}active{% endif %}">
+        <a href="{% url 'gym:member_list' %}" class="nav-item {% if request.resolver_match.url_name == 'member_list' or request.resolver_match.url_name == 'member_detail' or request.resolver_match.url_name == 'member_create' or request.resolver_match.url_name == 'member_edit' or request.resolver_match.url_name == 'subscription_assign' or request.resolver_match.url_name == 'subscription_renew' %}active{% endif %}">
           <span class="nav-icon">●</span>
           <span>Members</span>
+        </a>
+        <a href="{% url 'gym:plan_list' %}" class="nav-item {% if 'plan' in request.resolver_match.url_name %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Plans</span>
+        </a>
+        <a href="{% url 'gym:subscription_list' %}" class="nav-item {% if request.resolver_match.url_name == 'subscription_list' %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Subscriptions</span>
         </a>
       </nav>
       <div class="sidebar-footer">

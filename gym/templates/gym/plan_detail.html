@@ -1,0 +1,97 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{{ plan.name }} | Gym Management{% endblock %}
+{% block eyebrow %}Membership Plans{% endblock %}
+{% block page_title %}{{ plan.name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:plan_edit' plan.pk %}" class="btn btn-primary">Edit Plan</a>
+<form method="post" action="{% url 'gym:plan_toggle_status' plan.pk %}" class="inline-form">
+  {% csrf_token %}
+  <input type="hidden" name="next" value="{% url 'gym:plan_detail' plan.pk %}">
+  {% if plan.is_active %}
+  <button type="submit" class="btn btn-danger">Deactivate</button>
+  {% else %}
+  <button type="submit" class="btn btn-success">Activate</button>
+  {% endif %}
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Plan Details</h2>
+        <p class="card-subtitle">Pricing and duration configuration.</p>
+      </div>
+      {% if plan.is_active %}<span class="badge badge-active">Active</span>{% else %}<span class="badge badge-inactive">Inactive</span>{% endif %}
+    </div>
+    <div class="card-body">
+      <div class="detail-grid">
+        <div class="detail-item">
+          <div class="meta-label">Plan Name</div>
+          <div class="meta-value">{{ plan.name }}</div>
+        </div>
+        <div class="detail-item">
+          <div class="meta-label">Duration</div>
+          <div class="meta-value">{{ plan.duration_label }}</div>
+        </div>
+        <div class="detail-item">
+          <div class="meta-label">Price</div>
+          <div class="meta-value">BDT {{ plan.price|floatformat:2 }}</div>
+        </div>
+        <div class="detail-item">
+          <div class="meta-label">Status</div>
+          <div class="meta-value">{% if plan.is_active %}Active{% else %}Inactive{% endif %}</div>
+        </div>
+        <div class="detail-item full">
+          <div class="meta-label">Description</div>
+          <div class="meta-value">{{ plan.description|default:"No description provided."|linebreaksbr }}</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Recent Subscriptions</h2>
+        <p class="card-subtitle">Existing subscriptions retain their original plan price and history.</p>
+      </div>
+    </div>
+    {% if recent_subscriptions %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Member</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th>Price (BDT)</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sub in recent_subscriptions %}
+          <tr>
+            <td><a class="table-link" href="{% url 'gym:member_detail' sub.member.pk %}">{{ sub.member.member_id }} - {{ sub.member.full_name }}</a></td>
+            <td>{{ sub.start_date|date:"M d, Y" }}</td>
+            <td>{{ sub.end_date|date:"M d, Y" }}</td>
+            <td>BDT {{ sub.price_at_subscription|floatformat:2 }}</td>
+            <td><span class="badge badge-{{ sub.display_status }}">{{ sub.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">📄</div>
+      <h3>No subscriptions yet</h3>
+      <p>This plan has not been assigned to any member.</p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
