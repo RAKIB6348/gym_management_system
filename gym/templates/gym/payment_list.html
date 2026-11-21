@@ -1,0 +1,129 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Payment History | Gym Management{% endblock %}
+{% block eyebrow %}Payments{% endblock %}
+{% block page_title %}Payment History{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">All Payments</h2>
+      <p class="card-subtitle">Track collected payments, receipts, and cancellations.</p>
+    </div>
+    <form method="get" class="filter-bar" aria-label="Filter payments">
+      <div class="field field-search">
+        <label for="q">Search</label>
+        <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Member name, ID, or payment reference">
+      </div>
+      <div class="field">
+        <label for="method">Method</label>
+        <select id="method" name="method">
+          <option value="">All methods</option>
+          {% for value, label in method_choices %}
+          <option value="{{ value }}" {% if method_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All statuses</option>
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="date_from">From</label>
+        <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
+      </div>
+      <div class="field">
+        <label for="date_to">To</label>
+        <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
+      </div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or method_filter or status_filter or date_from or date_to %}
+      <a href="{% url 'gym:payment_list' %}" class="btn btn-secondary">Clear</a>
+      {% endif %}
+    </form>
+  </div>
+
+  {% if payments %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Reference</th>
+          <th>Member</th>
+          <th>Plan</th>
+          <th>Date</th>
+          <th>Method</th>
+          <th>Amount</th>
+          <th>Status</th>
+          <th>Collected By</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for payment in payments %}
+        <tr>
+          <td>{{ payment.payment_reference }}</td>
+          <td>
+            <div class="member-name"><a class="table-link" href="{% url 'gym:member_detail' payment.member.pk %}">{{ payment.member.member_id }}</a></div>
+            <div class="member-sub">{{ payment.member.full_name }}</div>
+          </td>
+          <td>{{ payment.subscription.plan.name }}</td>
+          <td>{{ payment.payment_date|date:"M d, Y" }}</td>
+          <td>{{ payment.get_payment_method_display }}</td>
+          <td>BDT {{ payment.amount|floatformat:2 }}</td>
+          <td>
+            {% if payment.status == 'completed' %}
+            <span class="badge badge-active">Completed</span>
+            {% else %}
+            <span class="badge badge-cancelled">Cancelled</span>
+            {% endif %}
+          </td>
+          <td>{{ payment.collected_by.get_full_name|default:payment.collected_by.username }}</td>
+          <td>
+            <div class="actions">
+              <a href="{% url 'gym:payment_receipt' payment.pk %}" class="btn btn-secondary btn-sm" target="_blank">Receipt</a>
+              {% if request.user.is_staff and payment.status == 'completed' %}
+              <form method="post" action="{% url 'gym:payment_cancel' payment.pk %}" class="inline-form" onsubmit="return confirm('Cancel payment {{ payment.payment_reference }}? This will recalculate due amounts.');">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <button type="submit" class="btn btn-danger btn-sm">Cancel</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if is_paginated %}
+  <div class="pagination">
+    <div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }} &middot; {{ page_obj.paginator.count }} payment{{ page_obj.paginator.count|pluralize }}</div>
+    <div class="page-links">
+      {% if page_obj.has_previous %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link disabled">Previous</span>{% endif %}
+      {% for num in page_obj.paginator.page_range %}
+        {% if num == page_obj.number %}<span class="page-link active">{{ num }}</span>
+        {% elif num >= page_obj.number|add:'-2' and num <= page_obj.number|add:'2' %}
+        <a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ num }}">{{ num }}</a>
+        {% endif %}
+      {% endfor %}
+      {% if page_obj.has_next %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link disabled">Next</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">৳</div>
+    <h3>No payments found</h3>
+    <p>{% if search_query or method_filter or status_filter or date_from or date_to %}Try adjusting your filters.{% else %}Payments recorded from member profiles will appear here.{% endif %}</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

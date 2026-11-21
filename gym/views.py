@@ -1,17 +1,21 @@
+import uuid
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib import messages
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import MemberForm, MembershipPlanForm, SubscriptionAssignForm
-from .models import Member, MemberSubscription, MembershipPlan
+from .forms import MemberForm, MembershipPlanForm, PaymentCollectForm, SubscriptionAssignForm
+from .models import Member, MemberSubscription, MembershipPayment, MembershipPlan
 
 
 class MemberListView(LoginRequiredMixin, ListView):
@@ -87,6 +91,10 @@ class MemberDetailView(LoginRequiredMixin, DetailView):
                 subscription.days_remaining_value = (subscription.start_date - today).days
             else:
                 subscription.days_remaining_value = 0
+            summary = subscription.payment_summary()
+            subscription.total_paid_display = summary['total_paid']
+            subscription.remaining_due_display = summary['remaining_due']
+            subscription.payment_status_display = summary['payment_status']
 
         current_subscription = None
         for sub in subscriptions:
@@ -98,9 +106,16 @@ class MemberDetailView(LoginRequiredMixin, DetailView):
             if upcoming:
                 current_subscription = sorted(upcoming, key=lambda s: s.start_date)[0]
 
+        payment_history = list(
+            self.object.payments.select_related('subscription', 'subscription__plan', 'collected_by').order_by('-payment_date', '-created_at')
+        )
+        current_payment_summary = current_subscription.payment_summary() if current_subscription else None
+
         context['subscriptions'] = subscriptions
         context['current_subscription'] = current_subscription
         context['today'] = today
+        context['payment_history'] = payment_history
+        context['current_payment_summary'] = current_payment_summary
         return context
 
 
@@ -371,3 +386,343 @@ class SubscriptionRenewView(LoginRequiredMixin, CreateView):
     def form_invalid(self, form):
         messages.error(self.request, 'Please correct the errors below.')
         return super().form_invalid(form)
+
+
+class PaymentCollectView(LoginRequiredMixin, View):
+    template_name = 'gym/payment_form.html'
+
+    def get_member_and_subscription(self, request, member_pk):
+        member = get_object_or_404(Member, pk=member_pk)
+        subscription_id = request.GET.get('subscription') or request.POST.get('subscription')
+        subscriptions = list(member.subscriptions.select_related('plan').order_by('-start_date', '-created_at'))
+        selected = None
+        if subscription_id:
+            selected = next((s for s in subscriptions if str(s.pk) == str(subscription_id)), None)
+        if selected is None:
+            today = timezone.localdate()
+            for s in subscriptions:
+                ds = s.current_status(today=today)
+                if ds == MemberSubscription.Status.ACTIVE:
+                    selected = s
+                    break
+            if selected is None:
+                upcoming = [s for s in subscriptions if s.current_status(today=today) == MemberSubscription.Status.UPCOMING]
+                if upcoming:
+                    selected = sorted(upcoming, key=lambda s: s.start_date)[0]
+            if selected is None and subscriptions:
+                selected = subscriptions[0]
+        return member, selected, subscriptions
+
+    def get(self, request, member_pk):
+        member, subscription, subscriptions = self.get_member_and_subscription(request, member_pk)
+        if not subscription:
+            messages.error(request, 'Assign a membership plan before collecting payment.')
+            return redirect('gym:member_detail', pk=member.pk)
+        summary = subscription.payment_summary()
+        form = PaymentCollectForm(subscription=subscription, initial={'payment_date': timezone.localdate()})
+        token = uuid.uuid4().hex
+        request.session[f'payment_token_{member.pk}'] = token
+        context = {
+            'member': member,
+            'subscription': subscription,
+            'subscriptions': subscriptions,
+            'summary': summary,
+            'form': form,
+            'payment_token': token,
+        }
+        return self._render(request, context)
+
+    def post(self, request, member_pk):
+        member, subscription, subscriptions = self.get_member_and_subscription(request, member_pk)
+        if not subscription:
+            messages.error(request, 'Assign a membership plan before collecting payment.')
+            return redirect('gym:member_detail', pk=member.pk)
+
+        token = request.POST.get('payment_token', '')
+        session_key = f'payment_token_{member.pk}'
+        expected = request.session.get(session_key)
+        if not expected or token != expected:
+            messages.error(request, 'Duplicate or invalid payment submission. Please try again.')
+            return redirect('gym:payment_collect', member_pk=member.pk)
+
+        form = PaymentCollectForm(request.POST, subscription=subscription)
+        summary = subscription.payment_summary()
+        context = {
+            'member': member,
+            'subscription': subscription,
+            'subscriptions': subscriptions,
+            'summary': summary,
+            'form': form,
+            'payment_token': token,
+        }
+        if not form.is_valid():
+            messages.error(request, 'Please correct the errors below.')
+            return self._render(request, context)
+
+        amount = form.cleaned_data['amount']
+        try:
+            with transaction.atomic():
+                locked_subscription = MemberSubscription.objects.select_for_update().select_related('member', 'plan').get(pk=subscription.pk)
+                if locked_subscription.member_id != member.pk:
+                    raise ValueError('Selected subscription does not belong to this member.')
+                paid = locked_subscription.payments.filter(status=MembershipPayment.Status.COMPLETED).aggregate(
+                    total=Coalesce(Sum('amount'), Decimal('0.00'))
+                )['total'] or Decimal('0.00')
+                remaining = locked_subscription.total_fee - paid
+                if amount > remaining:
+                    form.add_error('amount', f'Payment exceeds remaining due amount (BDT {remaining:.2f}).')
+                    raise ValueError('overpayment')
+                payment = form.save(commit=False)
+                payment.member = member
+                payment.subscription = locked_subscription
+                payment.collected_by = request.user
+                payment.status = MembershipPayment.Status.COMPLETED
+                payment.save()
+        except ValueError as exc:
+            if str(exc) == 'overpayment':
+                summary = subscription.payment_summary()
+                context['summary'] = summary
+                messages.error(request, 'Payment exceeds remaining due amount.')
+                return self._render(request, context)
+            form.add_error(None, str(exc))
+            messages.error(request, 'Could not record payment.')
+            return self._render(request, context)
+
+        request.session.pop(session_key, None)
+        messages.success(request, f'Payment {payment.payment_reference} recorded successfully. Receipt is available.')
+        return redirect('gym:member_detail', pk=member.pk)
+
+    def _render(self, request, context):
+        from django.shortcuts import render
+        return render(request, self.template_name, context)
+
+
+class PaymentHistoryListView(LoginRequiredMixin, ListView):
+    model = MembershipPayment
+    template_name = 'gym/payment_list.html'
+    context_object_name = 'payments'
+    paginate_by = 10
+
+    def get_queryset(self):
+        queryset = MembershipPayment.objects.select_related('member', 'subscription', 'subscription__plan', 'collected_by').all()
+        query = self.request.GET.get('q', '').strip()
+        method = self.request.GET.get('method', '').strip()
+        status = self.request.GET.get('status', '').strip()
+        date_from = self.request.GET.get('date_from', '').strip()
+        date_to = self.request.GET.get('date_to', '').strip()
+
+        if query:
+            queryset = queryset.filter(
+                Q(member__full_name__icontains=query)
+                | Q(member__member_id__icontains=query)
+                | Q(payment_reference__icontains=query)
+            )
+        if method in {c for c, _ in MembershipPayment.PaymentMethod.choices}:
+            queryset = queryset.filter(payment_method=method)
+        if status in {c for c, _ in MembershipPayment.Status.choices}:
+            queryset = queryset.filter(status=status)
+        if date_from:
+            queryset = queryset.filter(payment_date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(payment_date__lte=date_to)
+        return queryset.order_by('-payment_date', '-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        context['method_filter'] = self.request.GET.get('method', '').strip()
+        context['status_filter'] = self.request.GET.get('status', '').strip()
+        context['date_from'] = self.request.GET.get('date_from', '').strip()
+        context['date_to'] = self.request.GET.get('date_to', '').strip()
+        context['method_choices'] = MembershipPayment.PaymentMethod.choices
+        context['status_choices'] = MembershipPayment.Status.choices
+        query_params = self.request.GET.copy()
+        query_params.pop('page', None)
+        context['query_string'] = query_params.urlencode()
+        return context
+
+
+class PaymentCancelView(LoginRequiredMixin, UserPassesTestMixin, View):
+    raise_exception = True
+
+    def test_func(self):
+        return self.request.user.is_staff or self.request.user.is_superuser
+
+    def post(self, request, pk):
+        payment = get_object_or_404(MembershipPayment.objects.select_related('member'), pk=pk)
+        if payment.status == MembershipPayment.Status.CANCELLED:
+            messages.info(request, f'Payment {payment.payment_reference} is already cancelled.')
+        else:
+            payment.status = MembershipPayment.Status.CANCELLED
+            payment.save(update_fields=['status', 'updated_at'])
+            messages.success(request, f'Payment {payment.payment_reference} was cancelled. Totals have been recalculated.')
+        next_url = request.POST.get('next') or reverse('gym:payment_list')
+        return redirect(next_url)
+
+
+class PaymentReceiptView(LoginRequiredMixin, View):
+    def get(self, request, pk):
+        payment = get_object_or_404(
+            MembershipPayment.objects.select_related('member', 'subscription', 'subscription__plan', 'collected_by'),
+            pk=pk,
+        )
+        subscription = payment.subscription
+        completed_payments = list(
+            subscription.payments.filter(status=MembershipPayment.Status.COMPLETED).order_by('payment_date', 'created_at')
+        )
+        total_paid = sum((p.amount for p in completed_payments), Decimal('0.00'))
+        previous_paid = total_paid - payment.amount if payment.status == MembershipPayment.Status.COMPLETED else total_paid
+        if previous_paid < Decimal('0.00'):
+            previous_paid = Decimal('0.00')
+        remaining_due = subscription.total_fee - total_paid
+        if remaining_due < Decimal('0.00'):
+            remaining_due = Decimal('0.00')
+
+        from io import BytesIO
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=18*mm, leftMargin=18*mm, topMargin=16*mm, bottomMargin=16*mm)
+        styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle(name='GymTitle', parent=styles['Title'], fontSize=20, leading=24, textColor=colors.HexColor('#1d6fff'), spaceAfter=2))
+        styles.add(ParagraphStyle(name='Muted', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#667085'), leading=12))
+        styles.add(ParagraphStyle(name='Label', parent=styles['Normal'], fontSize=9, textColor=colors.HexColor('#667085'), leading=11))
+        styles.add(ParagraphStyle(name='Value', parent=styles['Normal'], fontSize=10, leading=13, spaceAfter=2))
+        styles.add(ParagraphStyle(name='Section', parent=styles['Heading3'], fontSize=11, leading=14, textColor=colors.HexColor('#182230'), spaceBefore=8, spaceAfter=6))
+
+        story = []
+        story.append(Paragraph('GymFlow Management System', styles['GymTitle']))
+        story.append(Paragraph('123 Fitness Avenue, Dhaka, Bangladesh | +880 1700-000000 | info@gymflow.example', styles['Muted']))
+        story.append(Spacer(1, 4*mm))
+        story.append(HRFlowable(width='100%', thickness=1, color=colors.HexColor('#e5eaf2'), spaceBefore=0, spaceAfter=8))
+
+        story.append(Paragraph('Payment Receipt', styles['Section']))
+        meta = [
+            ['Receipt Number', payment.payment_reference, 'Payment Date', payment.payment_date.strftime('%B %d, %Y')],
+            ['Collected By', payment.collected_by.get_full_name() or payment.collected_by.username, 'Status', payment.get_status_display()],
+        ]
+        meta_table = Table(meta, colWidths=[35*mm, 52*mm, 30*mm, 52*mm])
+        meta_table.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#667085')),
+            ('TEXTCOLOR', (2,0), (2,-1), colors.HexColor('#667085')),
+            ('FONTNAME', (1,0), (1,-1), 'Helvetica-Bold'),
+            ('FONTNAME', (3,0), (3,-1), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(meta_table)
+
+        story.append(Paragraph('Member & Subscription', styles['Section']))
+        details = [
+            ['Member Name', payment.member.full_name, 'Member ID', payment.member.member_id],
+            ['Membership Plan', subscription.plan.name, 'Payment Method', payment.get_payment_method_display()],
+            ['Subscription Period', f"{subscription.start_date.strftime('%b %d, %Y')} - {subscription.end_date.strftime('%b %d, %Y')}", 'Transaction Ref', payment.transaction_id or 'N/A'],
+        ]
+        detail_table = Table(details, colWidths=[35*mm, 52*mm, 30*mm, 52*mm])
+        detail_table.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 9),
+            ('TEXTCOLOR', (0,0), (0,-1), colors.HexColor('#667085')),
+            ('TEXTCOLOR', (2,0), (2,-1), colors.HexColor('#667085')),
+            ('FONTNAME', (1,0), (1,-1), 'Helvetica-Bold'),
+            ('FONTNAME', (3,0), (3,-1), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+            ('TOPPADDING', (0,0), (-1,-1), 6),
+        ]))
+        story.append(detail_table)
+
+        story.append(Paragraph('Payment Summary', styles['Section']))
+        summary_rows = [
+            ['Total Membership Fee', f'BDT {subscription.total_fee:.2f}'],
+            ['Previous Paid Amount', f'BDT {previous_paid:.2f}'],
+            ['Current Payment Amount', f'BDT {payment.amount:.2f}'],
+            ['Total Paid Amount', f'BDT {total_paid:.2f}'],
+            ['Remaining Due', f'BDT {remaining_due:.2f}'],
+        ]
+        summary_table = Table(summary_rows, colWidths=[110*mm, 59*mm])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-2), colors.HexColor('#f8fafc')),
+            ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#eff6ff')),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,-1), 10),
+            ('TEXTCOLOR', (1,0), (1,-1), colors.HexColor('#182230')),
+            ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+            ('ROWBACKGROUNDS', (0,0), (-1,-2), [colors.HexColor('#f8fafc'), colors.white]),
+            ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor('#e5eaf2')),
+            ('INNERGRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e5eaf2')),
+            ('PADDING', (0,0), (-1,-1), 8),
+        ]))
+        story.append(summary_table)
+
+        if payment.note:
+            story.append(Paragraph('Notes', styles['Section']))
+            story.append(Paragraph(payment.note.replace('\n', '<br/>'), styles['Normal']))
+
+        story.append(Spacer(1, 10*mm))
+        story.append(HRFlowable(width='100%', thickness=0.7, color=colors.HexColor('#e5eaf2'), spaceBefore=0, spaceAfter=6))
+        story.append(Paragraph('This is a system-generated receipt for gym membership payment records.', styles['Muted']))
+
+        doc.build(story)
+        buffer.seek(0)
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{payment.payment_reference}.pdf"'
+        return response
+
+
+class PaymentDashboardView(LoginRequiredMixin, View):
+    template_name = 'gym/payment_dashboard.html'
+
+    def get(self, request):
+        today = timezone.localdate()
+        completed = MembershipPayment.objects.filter(status=MembershipPayment.Status.COMPLETED)
+
+        total_collected = completed.aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')))['total'] or Decimal('0.00')
+        today_collected = completed.filter(payment_date=today).aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')))['total'] or Decimal('0.00')
+
+        subscriptions = MemberSubscription.objects.all().prefetch_related('payments')
+        total_fees = Decimal('0.00')
+        total_outstanding = Decimal('0.00')
+        outstanding_rows = []
+        for sub in subscriptions.select_related('member', 'plan'):
+            paid = sum((p.amount for p in sub.payments.all() if p.status == MembershipPayment.Status.COMPLETED), Decimal('0.00'))
+            fee = sub.total_fee
+            due = fee - paid
+            if due < Decimal('0.00'):
+                due = Decimal('0.00')
+            total_fees += fee
+            total_outstanding += due
+            if due > Decimal('0.00'):
+                sub.paid_display = paid
+                sub.due_display = due
+                sub.payment_status_display = sub.payment_status(total_paid=paid)
+                outstanding_rows.append(sub)
+        outstanding_rows.sort(key=lambda s: (s.due_display, s.member.full_name), reverse=True)
+
+        recent_payments = MembershipPayment.objects.select_related('member', 'subscription__plan', 'collected_by').order_by('-payment_date', '-created_at')[:10]
+        method_breakdown = []
+        for value, label in MembershipPayment.PaymentMethod.choices:
+            method_qs = completed.filter(payment_method=value)
+            agg = method_qs.aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')), count=Count('id'))
+            method_breakdown.append({'label': label, 'total': agg['total'] or Decimal('0.00'), 'count': agg['count']})
+
+        context = {
+            'total_fees': total_fees,
+            'total_collected': total_collected,
+            'total_outstanding': total_outstanding,
+            'today_collected': today_collected,
+            'recent_payments': recent_payments,
+            'outstanding_rows': outstanding_rows[:10],
+            'method_breakdown': method_breakdown,
+        }
+        return self._render(request, context)
+
+    def _render(self, request, context):
+        from django.shortcuts import render
+        return render(request, self.template_name, context)

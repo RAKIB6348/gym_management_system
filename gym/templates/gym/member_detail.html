@@ -179,6 +179,61 @@
     <section class="card">
       <div class="card-header">
         <div>
+          <h2 class="card-title">Payments</h2>
+          <p class="card-subtitle">Membership fees, payments, and receipts.</p>
+        </div>
+        <div class="section-actions">
+          {% if current_subscription %}
+          <a href="{% url 'gym:payment_collect' member.pk %}?subscription={{ current_subscription.pk }}" class="btn btn-primary btn-sm">Collect Payment</a>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-body">
+        {% if current_payment_summary %}
+        <div class="detail-grid" style="margin-bottom: 24px;">
+          <div class="detail-item"><div class="meta-label">Total Fee</div><div class="meta-value">BDT {{ current_payment_summary.total_fee|floatformat:2 }}</div></div>
+          <div class="detail-item"><div class="meta-label">Paid Amount</div><div class="meta-value">BDT {{ current_payment_summary.total_paid|floatformat:2 }}</div></div>
+          <div class="detail-item"><div class="meta-label">Due Amount</div><div class="meta-value">BDT {{ current_payment_summary.remaining_due|floatformat:2 }}</div></div>
+          <div class="detail-item">
+            <div class="meta-label">Payment Status</div>
+            <div class="meta-value"><span class="badge {% if current_payment_summary.payment_status == 'Paid' %}badge-active{% elif current_payment_summary.payment_status == 'Partial' %}badge-upcoming{% else %}badge-expired{% endif %}">{{ current_payment_summary.payment_status }}</span></div>
+          </div>
+        </div>
+        {% else %}
+        <p class="muted" style="margin-bottom: 20px;">No subscription selected. Assign a membership plan to track payments.</p>
+        {% endif %}
+
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Payment History</h3>
+        {% if payment_history %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Reference</th><th>Date</th><th>Plan</th><th>Method</th><th>Amount</th><th>Status</th><th>Receipt</th></tr>
+            </thead>
+            <tbody>
+              {% for payment in payment_history %}
+              <tr>
+                <td>{{ payment.payment_reference }}</td>
+                <td>{{ payment.payment_date|date:"M d, Y" }}</td>
+                <td>{{ payment.subscription.plan.name }}</td>
+                <td>{{ payment.get_payment_method_display }}</td>
+                <td>BDT {{ payment.amount|floatformat:2 }}</td>
+                <td>{% if payment.status == 'completed' %}<span class="badge badge-active">Completed</span>{% else %}<span class="badge badge-cancelled">Cancelled</span>{% endif %}</td>
+                <td><a href="{% url 'gym:payment_receipt' payment.pk %}" class="btn btn-secondary btn-sm" target="_blank">Download Receipt</a></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="muted">No payments recorded yet.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
           <h2 class="card-title">Contact Details</h2>
           <p class="card-subtitle">How to reach this member.</p>
         </div>

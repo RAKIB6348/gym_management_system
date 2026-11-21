@@ -4,7 +4,7 @@ from django import forms
 from django.core.validators import RegexValidator
 from django.utils import timezone
 
-from .models import Member, MemberSubscription, MembershipPlan, calculate_subscription_end_date
+from .models import Member, MemberSubscription, MembershipPayment, MembershipPlan, calculate_subscription_end_date
 
 
 phone_validator = RegexValidator(
@@ -142,3 +142,32 @@ class SubscriptionAssignForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+
+class PaymentCollectForm(forms.ModelForm):
+    class Meta:
+        model = MembershipPayment
+        fields = ['amount', 'payment_method', 'transaction_id', 'payment_date', 'note']
+        widgets = {
+            'amount': forms.NumberInput(attrs={'min': '0.01', 'step': '0.01', 'placeholder': '0.00'}),
+            'payment_date': forms.DateInput(attrs={'type': 'date'}),
+            'transaction_id': forms.TextInput(attrs={'placeholder': 'Optional transaction reference'}),
+            'note': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Optional note'}),
+        }
+
+    def __init__(self, *args, subscription=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.subscription = subscription
+        self.fields['payment_date'].initial = self.fields['payment_date'].initial or timezone.localdate()
+
+    def clean_amount(self):
+        amount = self.cleaned_data.get('amount')
+        if amount is None or amount <= Decimal('0.00'):
+            raise forms.ValidationError('Payment amount must be greater than zero.')
+        if self.subscription:
+            remaining = self.subscription.remaining_due_amount()
+            if amount > remaining:
+                raise forms.ValidationError(
+                    f'Payment exceeds remaining due amount (BDT {remaining:.2f}).'
+                )
+        return amount

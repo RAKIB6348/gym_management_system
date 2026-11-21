@@ -359,3 +359,213 @@ class MembershipPlanSubscriptionTests(TestCase):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 302)
             self.assertIn('/accounts/login/', response.url)
+
+from decimal import Decimal
+from django.test import TransactionTestCase
+from .models import MembershipPayment
+
+
+class PaymentFeatureTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='paystaff', password='pass12345', is_staff=True)
+        self.client.force_login(self.staff)
+        self.member = Member.objects.create(
+            full_name='Pay Member',
+            mobile_number='+15550009999',
+            gender=Member.Gender.MALE,
+            joining_date=date(2026, 1, 1),
+            status=Member.Status.ACTIVE,
+        )
+        self.plan = MembershipPlan.objects.create(name='Monthly', duration_months=1, price=Decimal('1500.00'), is_active=True)
+        self.subscription = MemberSubscription.objects.create(
+            member=self.member, plan=self.plan, start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 30), price_at_subscription=Decimal('1500.00'),
+            status=MemberSubscription.Status.ACTIVE,
+        )
+
+    def get_token(self, member_pk):
+        response = self.client.get(reverse('gym:payment_collect', args=[member_pk]))
+        return response.context['payment_token']
+
+    def post_payment(self, amount, method='cash', date_str='2026-11-21', token=None, subscription=None):
+        sub = subscription or self.subscription
+        if token is None:
+            token = self.get_token(self.member.pk)
+        return self.client.post(reverse('gym:payment_collect', args=[self.member.pk]), {
+            'payment_token': token,
+            'subscription': sub.pk,
+            'amount': str(amount),
+            'payment_method': method,
+            'payment_date': date_str,
+            'transaction_id': 'TXN1',
+            'note': '',
+        })
+
+    def test_full_membership_payment(self):
+        response = self.post_payment('1500.00')
+        self.assertEqual(response.status_code, 302)
+        self.subscription.refresh_from_db()
+        self.assertEqual(self.subscription.payment_status(), 'Paid')
+        self.assertEqual(self.subscription.remaining_due_amount(), Decimal('0.00'))
+
+    def test_partial_membership_payment(self):
+        self.post_payment('1000.00')
+        self.assertEqual(self.subscription.total_paid_amount(), Decimal('1000.00'))
+        self.assertEqual(self.subscription.remaining_due_amount(), Decimal('500.00'))
+        self.assertEqual(self.subscription.payment_status(), 'Partial')
+
+    def test_multiple_partial_payments(self):
+        self.post_payment('1000.00')
+        self.post_payment('300.00')
+        self.post_payment('200.00')
+        self.assertEqual(self.subscription.total_paid_amount(), Decimal('1500.00'))
+        self.assertEqual(self.subscription.remaining_due_amount(), Decimal('0.00'))
+        self.assertEqual(self.subscription.payment_status(), 'Paid')
+        self.assertEqual(MembershipPayment.objects.filter(subscription=self.subscription, status='completed').count(), 3)
+
+    def test_remaining_due_calculation(self):
+        self.post_payment('400.00')
+        self.assertEqual(self.subscription.remaining_due_amount(), Decimal('1100.00'))
+
+    def test_payment_status_calculation(self):
+        self.assertEqual(self.subscription.payment_status(), 'Unpaid')
+        self.post_payment('500.00')
+        self.assertEqual(self.subscription.payment_status(), 'Partial')
+        self.post_payment('1000.00')
+        self.assertEqual(self.subscription.payment_status(), 'Paid')
+
+    def test_overpayment_prevention(self):
+        response = self.post_payment('1600.00')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MembershipPayment.objects.count(), 0)
+        self.assertContains(response, 'exceeds remaining due')
+
+    def test_zero_negative_payment_rejection(self):
+        response = self.post_payment('0.00')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MembershipPayment.objects.count(), 0)
+        response = self.post_payment('-10.00')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(MembershipPayment.objects.count(), 0)
+
+    def test_duplicate_submission_prevention(self):
+        token = self.get_token(self.member.pk)
+        r1 = self.post_payment('500.00', token=token)
+        self.assertEqual(r1.status_code, 302)
+        r2 = self.post_payment('500.00', token=token)
+        self.assertEqual(r2.status_code, 302)  # redirected with error
+        self.assertEqual(MembershipPayment.objects.filter(subscription=self.subscription).count(), 1)
+
+    def test_payment_cancellation_and_recalculation(self):
+        self.post_payment('1000.00')
+        payment = MembershipPayment.objects.first()
+        response = self.client.post(reverse('gym:payment_cancel', args=[payment.pk]), {'next': reverse('gym:payment_list')})
+        self.assertEqual(response.status_code, 302)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, MembershipPayment.Status.CANCELLED)
+        self.assertEqual(self.subscription.total_paid_amount(), Decimal('0.00'))
+        self.assertEqual(self.subscription.payment_status(), 'Unpaid')
+
+    def test_payment_history(self):
+        self.post_payment('500.00')
+        response = self.client.get(reverse('gym:payment_list'), {'q': self.member.member_id})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'PAY-')
+        self.assertContains(response, self.member.full_name)
+
+    def test_pdf_receipt_generation(self):
+        self.post_payment('500.00')
+        payment = MembershipPayment.objects.first()
+        response = self.client.get(reverse('gym:payment_receipt', args=[payment.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF'))
+
+    def test_dashboard_totals(self):
+        self.post_payment('500.00')
+        # another subscription/member
+        m2 = Member.objects.create(full_name='M2', mobile_number='222', gender='male', joining_date=date(2026,1,1), status='active')
+        sub2 = MemberSubscription.objects.create(member=m2, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30), price_at_subscription=Decimal('1500.00'), status='active')
+        # pay sub2 fully
+        token = self.get_token(m2.pk)
+        self.client.post(reverse('gym:payment_collect', args=[m2.pk]), {
+            'payment_token': token, 'subscription': sub2.pk, 'amount': '1500.00', 'payment_method': 'cash', 'payment_date': '2026-11-21', 'transaction_id': '', 'note': ''
+        })
+        response = self.client.get(reverse('gym:payment_dashboard'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['total_fees'], Decimal('3000.00'))
+        self.assertEqual(response.context['total_collected'], Decimal('2000.00'))
+        self.assertEqual(response.context['total_outstanding'], Decimal('1000.00'))
+
+    def test_authentication_and_permissions(self):
+        self.client.logout()
+        urls = [
+            reverse('gym:payment_list'),
+            reverse('gym:payment_dashboard'),
+            reverse('gym:payment_collect', args=[self.member.pk]),
+        ]
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('/accounts/login/', response.url)
+
+        # cancel requires admin/staff
+        payment = MembershipPayment.objects.create(
+            member=self.member, subscription=self.subscription, amount=Decimal('100.00'),
+            payment_date=date(2026,11,21), payment_method='cash', status='completed', collected_by=self.staff
+        )
+        nonstaff = User.objects.create_user(username='normal', password='pass12345', is_staff=False)
+        self.client.force_login(nonstaff)
+        response = self.client.post(reverse('gym:payment_cancel', args=[payment.pk]))
+        self.assertEqual(response.status_code, 403)
+
+
+class PaymentConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='concurrent', password='pass12345', is_staff=True)
+        self.member = Member.objects.create(
+            full_name='Concurrent Member', mobile_number='999', gender='male', joining_date=date(2026,1,1), status='active'
+        )
+        self.plan = MembershipPlan.objects.create(name='Plan', duration_months=1, price=Decimal('1000.00'), is_active=True)
+        self.subscription = MemberSubscription.objects.create(
+            member=self.member, plan=self.plan, start_date=date(2026,11,1), end_date=date(2026,11,30),
+            price_at_subscription=Decimal('1000.00'), status='active'
+        )
+
+    def test_concurrent_payment_protection(self):
+        import threading
+        from django.db.models import Sum
+        from django.db.models.functions import Coalesce
+        from django.test import Client
+
+        results = []
+
+        def pay():
+            try:
+                c = Client()
+                c.force_login(self.staff)
+                resp_get = c.get(reverse('gym:payment_collect', args=[self.member.pk]))
+                token = resp_get.context['payment_token']
+                resp = c.post(reverse('gym:payment_collect', args=[self.member.pk]), {
+                    'payment_token': token,
+                    'subscription': self.subscription.pk,
+                    'amount': '800.00',
+                    'payment_method': 'cash',
+                    'payment_date': '2026-11-21',
+                    'transaction_id': '',
+                    'note': '',
+                })
+                results.append(resp.status_code)
+            except Exception:
+                results.append('error')
+
+        t1 = threading.Thread(target=pay)
+        t2 = threading.Thread(target=pay)
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        total_paid = MembershipPayment.objects.filter(
+            subscription=self.subscription, status=MembershipPayment.Status.COMPLETED
+        ).aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')))['total']
+        self.assertLessEqual(total_paid, Decimal('1000.00'))
+        self.assertTrue(MembershipPayment.objects.filter(subscription=self.subscription, status='completed').count() >= 1)

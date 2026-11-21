@@ -2,9 +2,11 @@ import calendar
 from datetime import timedelta
 from decimal import Decimal
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 
@@ -226,4 +228,114 @@ class MemberSubscription(models.Model):
             self.end_date = calculate_subscription_end_date(self.start_date, self.plan.duration_months)
         self.status = self.compute_status(self.start_date, self.end_date, status=self.status)
         self.full_clean()
+        super().save(*args, **kwargs)
+
+    @property
+    def total_fee(self):
+        return self.price_at_subscription or Decimal('0.00')
+
+    def total_paid_amount(self):
+        total = self.payments.filter(status=MembershipPayment.Status.COMPLETED).aggregate(
+            total=Coalesce(Sum('amount'), Decimal('0.00'), output_field=models.DecimalField(max_digits=10, decimal_places=2))
+        )['total']
+        return total or Decimal('0.00')
+
+    def remaining_due_amount(self, total_paid=None):
+        if total_paid is None:
+            total_paid = self.total_paid_amount()
+        remaining = self.total_fee - total_paid
+        return remaining if remaining > Decimal('0.00') else Decimal('0.00')
+
+    def payment_status(self, total_paid=None):
+        if total_paid is None:
+            total_paid = self.total_paid_amount()
+        total_fee = self.total_fee
+        if total_paid <= Decimal('0.00'):
+            return 'Unpaid'
+        if total_paid < total_fee:
+            return 'Partial'
+        return 'Paid'
+
+    def payment_summary(self):
+        total_paid = self.total_paid_amount()
+        return {
+            'total_fee': self.total_fee,
+            'total_paid': total_paid,
+            'remaining_due': self.remaining_due_amount(total_paid=total_paid),
+            'payment_status': self.payment_status(total_paid=total_paid),
+        }
+
+
+class MembershipPayment(models.Model):
+    class PaymentMethod(models.TextChoices):
+        CASH = 'cash', 'Cash'
+        BKASH = 'bkash', 'bKash'
+        NAGAD = 'nagad', 'Nagad'
+        BANK_TRANSFER = 'bank_transfer', 'Bank Transfer'
+
+    class Status(models.TextChoices):
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    payment_reference = models.CharField(max_length=20, unique=True, editable=False)
+    member = models.ForeignKey(Member, on_delete=models.PROTECT, related_name='payments')
+    subscription = models.ForeignKey(MemberSubscription, on_delete=models.PROTECT, related_name='payments')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    payment_date = models.DateField(default=timezone.localdate)
+    payment_method = models.CharField(max_length=20, choices=PaymentMethod.choices)
+    transaction_id = models.CharField(max_length=100, blank=True)
+    note = models.TextField(blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.COMPLETED)
+    collected_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='collected_payments')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-payment_date', '-created_at']
+        indexes = [
+            models.Index(fields=['payment_reference']),
+            models.Index(fields=['payment_date']),
+            models.Index(fields=['status']),
+            models.Index(fields=['member', 'payment_date']),
+        ]
+
+    def __str__(self):
+        return f'{self.payment_reference} - {self.member.member_id} - BDT {self.amount}'
+
+    @classmethod
+    def generate_payment_reference(cls):
+        prefix = 'PAY-'
+        last_payment = cls.objects.filter(payment_reference__startswith=prefix).order_by('-payment_reference').first()
+        if last_payment:
+            try:
+                last_number = int(last_payment.payment_reference.replace(prefix, ''))
+            except ValueError:
+                last_number = 0
+        else:
+            last_number = 0
+        return f'{prefix}{last_number + 1:04d}'
+
+    def clean(self):
+        errors = {}
+        if self.amount is not None and self.amount <= Decimal('0.00'):
+            errors['amount'] = 'Payment amount must be greater than zero.'
+        if self.member_id and self.subscription_id and self.subscription.member_id != self.member_id:
+            errors['subscription'] = 'Selected subscription does not belong to the selected member.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        if not self.payment_reference:
+            last_error = None
+            for _ in range(20):
+                self.payment_reference = self.generate_payment_reference()
+                try:
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError as exc:
+                    last_error = exc
+                    self.payment_reference = None
+            raise last_error
         super().save(*args, **kwargs)

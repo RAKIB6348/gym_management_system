@@ -1,0 +1,111 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Collect Payment | Gym Management{% endblock %}
+{% block eyebrow %}Payments{% endblock %}
+{% block page_title %}Collect Payment{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Back to Profile</a>
+{% endblock %}
+
+{% block content %}
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Payment Details</h2>
+        <p class="card-subtitle">Record a membership payment for {{ member.full_name }}.</p>
+      </div>
+      {% if subscriptions|length > 1 %}
+      <form method="get" class="filter-bar">
+        <div class="field">
+          <label for="subscription">Subscription</label>
+          <select name="subscription" id="subscription" onchange="this.form.submit()">
+            {% for sub in subscriptions %}
+            <option value="{{ sub.pk }}" {% if sub.pk == subscription.pk %}selected{% endif %}>
+              {{ sub.plan.name }} ({{ sub.start_date|date:"M d, Y" }} - {{ sub.end_date|date:"M d, Y" }})
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+    <div class="card-body">
+      <div class="detail-grid" style="margin-bottom: 24px;">
+        <div class="detail-item"><div class="meta-label">Member Name</div><div class="meta-value">{{ member.full_name }}</div></div>
+        <div class="detail-item"><div class="meta-label">Member ID</div><div class="meta-value">{{ member.member_id }}</div></div>
+        <div class="detail-item"><div class="meta-label">Membership Plan</div><div class="meta-value">{{ subscription.plan.name }}</div></div>
+        <div class="detail-item"><div class="meta-label">Subscription Period</div><div class="meta-value">{{ subscription.start_date|date:"M d, Y" }} - {{ subscription.end_date|date:"M d, Y" }}</div></div>
+        <div class="detail-item"><div class="meta-label">Total Fee</div><div class="meta-value">BDT {{ summary.total_fee|floatformat:2 }}</div></div>
+        <div class="detail-item"><div class="meta-label">Already Paid</div><div class="meta-value">BDT {{ summary.total_paid|floatformat:2 }}</div></div>
+        <div class="detail-item"><div class="meta-label">Remaining Due</div><div class="meta-value">BDT {{ summary.remaining_due|floatformat:2 }}</div></div>
+        <div class="detail-item"><div class="meta-label">Payment Status</div><div class="meta-value"><span class="badge {% if summary.payment_status == 'Paid' %}badge-active{% elif summary.payment_status == 'Partial' %}badge-upcoming{% else %}badge-expired{% endif %}">{{ summary.payment_status }}</span></div></div>
+      </div>
+
+      {% if summary.remaining_due > 0 %}
+      <form method="post" novalidate id="payment-form">
+        {% csrf_token %}
+        <input type="hidden" name="payment_token" value="{{ payment_token }}">
+        <input type="hidden" name="subscription" value="{{ subscription.pk }}">
+
+        {% if form.non_field_errors %}
+        <div class="alert alert-error" style="margin-bottom: 20px;">{{ form.non_field_errors }}</div>
+        {% endif %}
+
+        <div class="form-grid">
+          <div class="form-group {% if form.amount.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.amount.id_for_label }}">Payment Amount (BDT) *</label>
+            {{ form.amount }}
+            <div class="form-help">Maximum: BDT {{ summary.remaining_due|floatformat:2 }}</div>
+            {% for error in form.amount.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+          </div>
+
+          <div class="form-group {% if form.payment_method.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.payment_method.id_for_label }}">Payment Method *</label>
+            {{ form.payment_method }}
+            {% for error in form.payment_method.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+          </div>
+
+          <div class="form-group {% if form.payment_date.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.payment_date.id_for_label }}">Payment Date *</label>
+            {{ form.payment_date }}
+            {% for error in form.payment_date.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+          </div>
+
+          <div class="form-group {% if form.transaction_id.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.transaction_id.id_for_label }}">Transaction ID</label>
+            {{ form.transaction_id }}
+            {% for error in form.transaction_id.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+          </div>
+
+          <div class="form-group full {% if form.note.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.note.id_for_label }}">Notes</label>
+            {{ form.note }}
+            {% for error in form.note.errors %}<ul class="errorlist"><li>{{ error }}</li></ul>{% endfor %}
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Cancel</a>
+          <button type="submit" class="btn btn-primary">Confirm Payment</button>
+        </div>
+      </form>
+      <script>
+        document.getElementById('payment-form').addEventListener('submit', function(e) {
+          if (!confirm('Confirm this payment? This will be recorded in payment history.')) {
+            e.preventDefault();
+            return;
+          }
+          var btn = this.querySelector('button[type="submit"]');
+          btn.disabled = true;
+          btn.textContent = 'Processing...';
+        });
+      </script>
+      {% else %}
+      <div class="alert alert-success">This subscription is fully paid. No remaining due amount.</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

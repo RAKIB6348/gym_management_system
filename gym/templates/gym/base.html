@@ -33,6 +33,14 @@
           <span class="nav-icon">●</span>
           <span>Subscriptions</span>
         </a>
+        <a href="{% url 'gym:payment_list' %}" class="nav-item {% if request.resolver_match.url_name == 'payment_list' or request.resolver_match.url_name == 'payment_collect' or request.resolver_match.url_name == 'payment_receipt' %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Payments</span>
+        </a>
+        <a href="{% url 'gym:payment_dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'payment_dashboard' %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Dashboard</span>
+        </a>
       </nav>
       <div class="sidebar-footer">
         {% if request.user.is_authenticated %}

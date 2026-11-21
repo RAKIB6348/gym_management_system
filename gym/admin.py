@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Member, MembershipPlan, MemberSubscription
+from .models import Member, MembershipPlan, MemberSubscription, MembershipPayment
 
 
 @admin.register(Member)
@@ -24,3 +24,11 @@ class MemberSubscriptionAdmin(admin.ModelAdmin):
     list_filter = ('status', 'plan')
     search_fields = ('member__member_id', 'member__full_name', 'plan__name')
     readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(MembershipPayment)
+class MembershipPaymentAdmin(admin.ModelAdmin):
+    list_display = ('payment_reference', 'member', 'subscription', 'amount', 'payment_date', 'payment_method', 'status', 'collected_by')
+    list_filter = ('status', 'payment_method', 'payment_date')
+    search_fields = ('payment_reference', 'member__member_id', 'member__full_name', 'transaction_id')
+    readonly_fields = ('payment_reference', 'created_at', 'updated_at')

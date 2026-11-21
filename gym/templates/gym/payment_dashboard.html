@@ -1,0 +1,120 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Payment Dashboard | Gym Management{% endblock %}
+{% block eyebrow %}Payments{% endblock %}
+{% block page_title %}Payment Dashboard{% endblock %}
+
+{% block content %}
+<section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+  <div class="stat-card">
+    <div class="stat-label">Total Membership Fees</div>
+    <div class="stat-value">BDT {{ total_fees|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Collected</div>
+    <div class="stat-value success">BDT {{ total_collected|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Outstanding Due</div>
+    <div class="stat-value" style="color:#dc2626;">BDT {{ total_outstanding|floatformat:2 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Today's Collection</div>
+    <div class="stat-value">BDT {{ today_collected|floatformat:2 }}</div>
+  </div>
+</section>
+
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Recent Payments</h2>
+        <p class="card-subtitle">Latest payment activity across members.</p>
+      </div>
+      <a href="{% url 'gym:payment_list' %}" class="btn btn-secondary btn-sm">View All</a>
+    </div>
+    {% if recent_payments %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Reference</th><th>Member</th><th>Plan</th><th>Date</th><th>Method</th><th>Amount</th><th>Status</th><th>Receipt</th></tr></thead>
+        <tbody>
+          {% for payment in recent_payments %}
+          <tr>
+            <td>{{ payment.payment_reference }}</td>
+            <td><a class="table-link" href="{% url 'gym:member_detail' payment.member.pk %}">{{ payment.member.full_name }}</a></td>
+            <td>{{ payment.subscription.plan.name }}</td>
+            <td>{{ payment.payment_date|date:"M d, Y" }}</td>
+            <td>{{ payment.get_payment_method_display }}</td>
+            <td>BDT {{ payment.amount|floatformat:2 }}</td>
+            <td>{% if payment.status == 'completed' %}<span class="badge badge-active">Completed</span>{% else %}<span class="badge badge-cancelled">Cancelled</span>{% endif %}</td>
+            <td><a href="{% url 'gym:payment_receipt' payment.pk %}" class="btn btn-secondary btn-sm" target="_blank">Receipt</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p class="muted">No payments recorded yet.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Members with Outstanding Dues</h2>
+        <p class="card-subtitle">Subscriptions with remaining balance.</p>
+      </div>
+    </div>
+    {% if outstanding_rows %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Member</th><th>Plan</th><th>Total Fee</th><th>Paid</th><th>Due</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody>
+          {% for sub in outstanding_rows %}
+          <tr>
+            <td><a class="table-link" href="{% url 'gym:member_detail' sub.member.pk %}">{{ sub.member.member_id }} - {{ sub.member.full_name }}</a></td>
+            <td>{{ sub.plan.name }}</td>
+            <td>BDT {{ sub.total_fee|floatformat:2 }}</td>
+            <td>BDT {{ sub.paid_display|floatformat:2 }}</td>
+            <td>BDT {{ sub.due_display|floatformat:2 }}</td>
+            <td><span class="badge {% if sub.payment_status_display == 'Paid' %}badge-active{% elif sub.payment_status_display == 'Partial' %}badge-upcoming{% else %}badge-expired{% endif %}">{{ sub.payment_status_display }}</span></td>
+            <td><a href="{% url 'gym:payment_collect' sub.member.pk %}?subscription={{ sub.pk }}" class="btn btn-primary btn-sm">Collect</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state"><p class="muted">No outstanding dues.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Payment Method Breakdown</h2>
+        <p class="card-subtitle">Completed payment totals by method.</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Method</th><th>Transactions</th><th>Total Collected</th></tr></thead>
+        <tbody>
+          {% for row in method_breakdown %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.count }}</td>
+            <td>BDT {{ row.total|floatformat:2 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<style>
+@media (max-width: 1100px) { .stats-grid[style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; } }
+@media (max-width: 640px) { .stats-grid[style*="repeat(4"] { grid-template-columns: 1fr !important; } }
+</style>
+{% endblock %}

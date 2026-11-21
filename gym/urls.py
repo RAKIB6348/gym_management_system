@@ -22,4 +22,10 @@ urlpatterns = [
     path('plans/<int:pk>/toggle-status/', views.MembershipPlanToggleStatusView.as_view(), name='plan_toggle_status'),
 
     path('subscriptions/', views.MemberSubscriptionListView.as_view(), name='subscription_list'),
+
+    path('payments/', views.PaymentHistoryListView.as_view(), name='payment_list'),
+    path('payments/dashboard/', views.PaymentDashboardView.as_view(), name='payment_dashboard'),
+    path('payments/<int:pk>/receipt/', views.PaymentReceiptView.as_view(), name='payment_receipt'),
+    path('payments/<int:pk>/cancel/', views.PaymentCancelView.as_view(), name='payment_cancel'),
+    path('members/<int:member_pk>/payments/collect/', views.PaymentCollectView.as_view(), name='payment_collect'),
 ]
