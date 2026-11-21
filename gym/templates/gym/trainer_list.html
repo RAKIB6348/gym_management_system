@@ -1,0 +1,114 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Trainers | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Management{% endblock %}
+{% block page_title %}Trainers{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:trainer_dashboard' %}" class="btn btn-secondary">Trainer Dashboard</a>
+<a href="{% url 'gym:trainer_create' %}" class="btn btn-primary">+ Add Trainer</a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">Trainer Directory</h2>
+      <p class="card-subtitle">Manage trainers, assignments, and availability.</p>
+    </div>
+    <form method="get" class="filter-bar">
+      <div class="field field-search">
+        <label for="q">Search</label>
+        <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Name, phone, or trainer ID">
+      </div>
+      <div class="field">
+        <label for="specialization">Specialization</label>
+        <input type="text" id="specialization" name="specialization" value="{{ specialization_filter }}" placeholder="e.g. Yoga">
+      </div>
+      <div class="field field-status">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="">All statuses</option>
+          {% for value, label in status_choices %}
+          <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary">Apply</button>
+      {% if search_query or status_filter or specialization_filter %}<a href="{% url 'gym:trainer_list' %}" class="btn btn-secondary">Clear</a>{% endif %}
+    </form>
+  </div>
+
+  {% if trainers %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Trainer</th>
+          <th>Trainer ID</th>
+          <th>Phone</th>
+          <th>Specialization</th>
+          <th>Experience</th>
+          <th>Assigned Members</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for trainer in trainers %}
+        <tr>
+          <td>
+            <div class="member-cell">
+              {% if trainer.photo %}<img src="{{ trainer.photo.url }}" alt="{{ trainer.full_name }}" class="avatar">
+              {% else %}<div class="avatar">{{ trainer.full_name|slice:":1"|upper }}</div>{% endif %}
+              <div>
+                <div class="member-name">{{ trainer.full_name }}</div>
+                <div class="member-sub">{{ trainer.email|default:"No email" }}</div>
+              </div>
+            </div>
+          </td>
+          <td>{{ trainer.trainer_id }}</td>
+          <td>{{ trainer.phone }}</td>
+          <td>{{ trainer.specialization }}</td>
+          <td>{{ trainer.experience_years }} yr{{ trainer.experience_years|pluralize }}</td>
+          <td>{{ trainer.assigned_members_count }}</td>
+          <td><span class="badge badge-{{ trainer.status }}">{{ trainer.get_status_display }}</span></td>
+          <td>
+            <div class="actions">
+              <a href="{% url 'gym:trainer_detail' trainer.pk %}" class="btn btn-secondary btn-sm">View</a>
+              <a href="{% url 'gym:trainer_edit' trainer.pk %}" class="btn btn-secondary btn-sm">Edit</a>
+              <form method="post" action="{% url 'gym:trainer_toggle_status' trainer.pk %}" class="inline-form">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                {% if trainer.status == 'active' %}
+                <button type="submit" class="btn btn-danger btn-sm">Deactivate</button>
+                {% else %}
+                <button type="submit" class="btn btn-success btn-sm">Activate</button>
+                {% endif %}
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if is_paginated %}
+  <div class="pagination">
+    <div class="page-info">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</div>
+    <div class="page-links">
+      {% if page_obj.has_previous %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.previous_page_number }}">Previous</a>{% else %}<span class="page-link disabled">Previous</span>{% endif %}
+      {% if page_obj.has_next %}<a class="page-link" href="?{% if query_string %}{{ query_string }}&{% endif %}page={{ page_obj.next_page_number }}">Next</a>{% else %}<span class="page-link disabled">Next</span>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-icon">🏋️</div>
+    <h3>No trainers found</h3>
+    <p>Add your first trainer to start assigning members.</p>
+    <a href="{% url 'gym:trainer_create' %}" class="btn btn-primary">Add Trainer</a>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

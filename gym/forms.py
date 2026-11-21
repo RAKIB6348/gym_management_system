@@ -4,7 +4,11 @@ from django import forms
 from django.core.validators import RegexValidator
 from django.utils import timezone
 
-from .models import Member, MemberSubscription, MembershipPayment, MembershipPlan, calculate_subscription_end_date
+from .models import (
+    Member, MemberSubscription, MembershipPayment, MembershipPlan,
+    Trainer, TrainerAssignment, TrainerAvailability,
+    calculate_subscription_end_date,
+)
 
 
 phone_validator = RegexValidator(
@@ -171,3 +175,97 @@ class PaymentCollectForm(forms.ModelForm):
                     f'Payment exceeds remaining due amount (BDT {remaining:.2f}).'
                 )
         return amount
+
+
+class TrainerForm(forms.ModelForm):
+    phone = forms.CharField(
+        max_length=20,
+        required=True,
+        validators=[phone_validator],
+        widget=forms.TextInput(attrs={'placeholder': 'e.g. +1 555 123 4567'}),
+    )
+
+    class Meta:
+        model = Trainer
+        fields = [
+            'full_name', 'photo', 'phone', 'email', 'gender', 'date_of_birth',
+            'address', 'specialization', 'experience_years', 'qualification',
+            'joining_date', 'status',
+        ]
+        widgets = {
+            'full_name': forms.TextInput(attrs={'placeholder': 'Full name'}),
+            'email': forms.EmailInput(attrs={'placeholder': 'name@example.com'}),
+            'gender': forms.RadioSelect,
+            'date_of_birth': forms.DateInput(attrs={'type': 'date'}),
+            'address': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Address'}),
+            'specialization': forms.TextInput(attrs={'placeholder': 'e.g. Strength Training, Yoga'}),
+            'experience_years': forms.NumberInput(attrs={'min': 0, 'step': 1}),
+            'qualification': forms.Textarea(attrs={'rows': 3, 'placeholder': 'Certifications, qualifications'}),
+            'joining_date': forms.DateInput(attrs={'type': 'date'}),
+        }
+
+    def clean_full_name(self):
+        name = self.cleaned_data.get('full_name', '').strip()
+        if not name:
+            raise forms.ValidationError('Full name is required.')
+        return name
+
+    def clean_experience_years(self):
+        years = self.cleaned_data.get('experience_years')
+        if years is None or years < 0:
+            raise forms.ValidationError('Experience years cannot be negative.')
+        return years
+
+
+class TrainerAssignmentForm(forms.ModelForm):
+    class Meta:
+        model = TrainerAssignment
+        fields = ['trainer', 'member', 'start_date', 'end_date']
+        widgets = {
+            'start_date': forms.DateInput(attrs={'type': 'date'}),
+            'end_date': forms.DateInput(attrs={'type': 'date'}),
+        }
+
+    def __init__(self, *args, trainer=None, member=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fixed_trainer = trainer
+        self.fixed_member = member
+        if trainer is not None:
+            self.fields['trainer'].initial = trainer
+            self.fields['trainer'].queryset = Trainer.objects.filter(pk=trainer.pk)
+            self.fields['trainer'].widget = forms.HiddenInput()
+        else:
+            self.fields['trainer'].queryset = Trainer.objects.filter(status=Trainer.Status.ACTIVE).order_by('full_name')
+            self.fields['trainer'].empty_label = 'Select a trainer'
+        if member is not None:
+            self.fields['member'].initial = member
+            self.fields['member'].queryset = Member.objects.filter(pk=member.pk)
+            self.fields['member'].widget = forms.HiddenInput()
+        else:
+            self.fields['member'].queryset = Member.objects.order_by('full_name')
+            self.fields['member'].empty_label = 'Select a member'
+        if not self.initial.get('start_date'):
+            self.fields['start_date'].initial = timezone.localdate()
+
+    def clean(self):
+        cleaned = super().clean()
+        trainer = cleaned.get('trainer')
+        member = cleaned.get('member')
+        start_date = cleaned.get('start_date')
+        end_date = cleaned.get('end_date')
+        if start_date and end_date and end_date < start_date:
+            self.add_error('end_date', 'End date cannot be before start date.')
+        if trainer and trainer.status != Trainer.Status.ACTIVE:
+            self.add_error('trainer', 'Inactive trainers cannot receive new assignments.')
+        # Reassignment is handled in the view by ending the current active assignment in a transaction.
+        return cleaned
+
+
+class TrainerAvailabilityForm(forms.ModelForm):
+    class Meta:
+        model = TrainerAvailability
+        fields = ['day_of_week', 'start_time', 'end_time', 'is_available']
+        widgets = {
+            'start_time': forms.TimeInput(attrs={'type': 'time'}),
+            'end_time': forms.TimeInput(attrs={'type': 'time'}),
+        }

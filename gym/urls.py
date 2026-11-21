@@ -28,4 +28,16 @@ urlpatterns = [
     path('payments/<int:pk>/receipt/', views.PaymentReceiptView.as_view(), name='payment_receipt'),
     path('payments/<int:pk>/cancel/', views.PaymentCancelView.as_view(), name='payment_cancel'),
     path('members/<int:member_pk>/payments/collect/', views.PaymentCollectView.as_view(), name='payment_collect'),
+
+    path('trainers/', views.TrainerListView.as_view(), name='trainer_list'),
+    path('trainers/dashboard/', views.TrainerDashboardView.as_view(), name='trainer_dashboard'),
+    path('trainers/add/', views.TrainerCreateView.as_view(), name='trainer_create'),
+    path('trainers/<int:pk>/', views.TrainerDetailView.as_view(), name='trainer_detail'),
+    path('trainers/<int:pk>/edit/', views.TrainerUpdateView.as_view(), name='trainer_edit'),
+    path('trainers/<int:pk>/toggle-status/', views.TrainerToggleStatusView.as_view(), name='trainer_toggle_status'),
+    path('trainers/<int:trainer_pk>/assign-member/', views.TrainerAssignmentCreateView.as_view(), name='trainer_assign_member'),
+    path('trainers/<int:trainer_pk>/availability/', views.TrainerAvailabilityManageView.as_view(), name='trainer_availability'),
+    path('trainers/availability/<int:pk>/delete/', views.TrainerAvailabilityDeleteView.as_view(), name='trainer_availability_delete'),
+    path('trainers/assignments/<int:pk>/end/', views.TrainerAssignmentEndView.as_view(), name='trainer_assignment_end'),
+    path('members/<int:member_pk>/assign-trainer/', views.TrainerAssignmentCreateView.as_view(), name='member_assign_trainer'),
 ]

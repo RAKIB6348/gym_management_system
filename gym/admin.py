@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Member, MembershipPlan, MemberSubscription, MembershipPayment
+from .models import Member, MembershipPlan, MemberSubscription, MembershipPayment, Trainer, TrainerAssignment, TrainerAvailability
 
 
 @admin.register(Member)
@@ -32,3 +32,25 @@ class MembershipPaymentAdmin(admin.ModelAdmin):
     list_filter = ('status', 'payment_method', 'payment_date')
     search_fields = ('payment_reference', 'member__member_id', 'member__full_name', 'transaction_id')
     readonly_fields = ('payment_reference', 'created_at', 'updated_at')
+
+
+@admin.register(Trainer)
+class TrainerAdmin(admin.ModelAdmin):
+    list_display = ('trainer_id', 'full_name', 'phone', 'specialization', 'experience_years', 'status')
+    list_filter = ('status', 'specialization')
+    search_fields = ('trainer_id', 'full_name', 'phone', 'email')
+    readonly_fields = ('trainer_id', 'created_at', 'updated_at')
+
+
+@admin.register(TrainerAssignment)
+class TrainerAssignmentAdmin(admin.ModelAdmin):
+    list_display = ('trainer', 'member', 'start_date', 'end_date', 'status')
+    list_filter = ('status',)
+    search_fields = ('trainer__trainer_id', 'trainer__full_name', 'member__member_id', 'member__full_name')
+
+
+@admin.register(TrainerAvailability)
+class TrainerAvailabilityAdmin(admin.ModelAdmin):
+    list_display = ('trainer', 'day_of_week', 'start_time', 'end_time', 'is_available')
+    list_filter = ('day_of_week', 'is_available')
+    search_fields = ('trainer__trainer_id', 'trainer__full_name')

@@ -8,14 +8,20 @@ from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
-from .forms import MemberForm, MembershipPlanForm, PaymentCollectForm, SubscriptionAssignForm
-from .models import Member, MemberSubscription, MembershipPayment, MembershipPlan
+from .forms import (
+    MemberForm, MembershipPlanForm, PaymentCollectForm, SubscriptionAssignForm,
+    TrainerForm, TrainerAssignmentForm, TrainerAvailabilityForm,
+)
+from .models import (
+    Member, MemberSubscription, MembershipPayment, MembershipPlan,
+    Trainer, TrainerAssignment, TrainerAvailability,
+)
 
 
 class MemberListView(LoginRequiredMixin, ListView):
@@ -111,11 +117,18 @@ class MemberDetailView(LoginRequiredMixin, DetailView):
         )
         current_payment_summary = current_subscription.payment_summary() if current_subscription else None
 
+        trainer_assignments = list(
+            self.object.trainer_assignments.select_related('trainer').order_by('-start_date', '-created_at')
+        )
+        current_trainer_assignment = next((a for a in trainer_assignments if a.status == TrainerAssignment.Status.ACTIVE), None)
+
         context['subscriptions'] = subscriptions
         context['current_subscription'] = current_subscription
         context['today'] = today
         context['payment_history'] = payment_history
         context['current_payment_summary'] = current_payment_summary
+        context['trainer_assignments'] = trainer_assignments
+        context['current_trainer_assignment'] = current_trainer_assignment
         return context
 
 
@@ -726,3 +739,236 @@ class PaymentDashboardView(LoginRequiredMixin, View):
     def _render(self, request, context):
         from django.shortcuts import render
         return render(request, self.template_name, context)
+
+
+class TrainerListView(LoginRequiredMixin, ListView):
+    model = Trainer
+    template_name = 'gym/trainer_list.html'
+    context_object_name = 'trainers'
+    paginate_by = 10
+
+    def get_queryset(self):
+        qs = Trainer.objects.all().annotate(
+            assigned_members_count=Count('assignments__member', filter=Q(assignments__status=TrainerAssignment.Status.ACTIVE), distinct=True)
+        )
+        q = self.request.GET.get('q', '').strip()
+        status = self.request.GET.get('status', '').strip()
+        specialization = self.request.GET.get('specialization', '').strip()
+        if q:
+            qs = qs.filter(Q(full_name__icontains=q) | Q(phone__icontains=q) | Q(trainer_id__icontains=q))
+        if status in {Trainer.Status.ACTIVE, Trainer.Status.INACTIVE}:
+            qs = qs.filter(status=status)
+        if specialization:
+            qs = qs.filter(specialization__icontains=specialization)
+        return qs.order_by('-created_at')
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['search_query'] = self.request.GET.get('q', '').strip()
+        context['status_filter'] = self.request.GET.get('status', '').strip()
+        context['specialization_filter'] = self.request.GET.get('specialization', '').strip()
+        context['status_choices'] = Trainer.Status.choices
+        params = self.request.GET.copy()
+        params.pop('page', None)
+        context['query_string'] = params.urlencode()
+        return context
+
+
+class TrainerCreateView(LoginRequiredMixin, CreateView):
+    model = Trainer
+    form_class = TrainerForm
+    template_name = 'gym/trainer_form.html'
+
+    def get_success_url(self):
+        return reverse('gym:trainer_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f'Trainer {self.object.trainer_id} was created successfully.')
+        return response
+
+    def form_invalid(self, form):
+        messages.error(self.request, 'Please correct the errors below.')
+        return super().form_invalid(form)
+
+
+class TrainerDetailView(LoginRequiredMixin, DetailView):
+    model = Trainer
+    template_name = 'gym/trainer_detail.html'
+    context_object_name = 'trainer'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        assignments = list(self.object.assignments.select_related('member').order_by('-start_date', '-created_at'))
+        context['active_assignments'] = [a for a in assignments if a.status == TrainerAssignment.Status.ACTIVE]
+        context['assignment_history'] = assignments
+        context['availabilities'] = self.object.availabilities.all().order_by('day_of_week', 'start_time')
+        return context
+
+
+class TrainerUpdateView(LoginRequiredMixin, UpdateView):
+    model = Trainer
+    form_class = TrainerForm
+    template_name = 'gym/trainer_form.html'
+
+    def get_success_url(self):
+        return reverse('gym:trainer_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f'Trainer {self.object.trainer_id} was updated successfully.')
+        return response
+
+    def form_invalid(self, form):
+        messages.error(self.request, 'Please correct the errors below.')
+        return super().form_invalid(form)
+
+
+class TrainerToggleStatusView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        trainer = get_object_or_404(Trainer, pk=pk)
+        trainer.status = Trainer.Status.INACTIVE if trainer.status == Trainer.Status.ACTIVE else Trainer.Status.ACTIVE
+        trainer.save(update_fields=['status', 'updated_at'])
+        messages.success(request, f'Trainer {trainer.trainer_id} was {"activated" if trainer.status == Trainer.Status.ACTIVE else "deactivated"}.')
+        return redirect(request.POST.get('next') or reverse('gym:trainer_detail', kwargs={'pk': trainer.pk}))
+
+
+class TrainerAssignmentCreateView(LoginRequiredMixin, CreateView):
+    model = TrainerAssignment
+    form_class = TrainerAssignmentForm
+    template_name = 'gym/trainer_assignment_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.trainer = None
+        self.member = None
+        if 'trainer_pk' in kwargs:
+            self.trainer = get_object_or_404(Trainer, pk=kwargs['trainer_pk'])
+        if 'member_pk' in kwargs:
+            self.member = get_object_or_404(Member, pk=kwargs['member_pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['trainer'] = self.trainer
+        kwargs['member'] = self.member
+        return kwargs
+
+    def get_form(self, form_class=None):
+        form = super().get_form(form_class)
+        form.instance._allow_reassign = True
+        return form
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['trainer'] = self.trainer
+        context['member'] = self.member
+        context['current_assignment'] = None
+        member = self.member or (self.object.member if self.object and self.object.pk else None)
+        if member:
+            context['current_assignment'] = TrainerAssignment.objects.filter(member=member, status=TrainerAssignment.Status.ACTIVE).select_related('trainer').first()
+        return context
+
+    def form_valid(self, form):
+        try:
+            with transaction.atomic():
+                member = form.cleaned_data['member']
+                trainer = form.cleaned_data['trainer']
+                if trainer.status != Trainer.Status.ACTIVE:
+                    form.add_error('trainer', 'Inactive trainers cannot receive new assignments.')
+                    return self.form_invalid(form)
+                existing = TrainerAssignment.objects.select_for_update().filter(member=member, status=TrainerAssignment.Status.ACTIVE).first()
+                if existing:
+                    # Reassign: end existing assignment, preserve history
+                    existing.status = TrainerAssignment.Status.COMPLETED
+                    existing.end_date = form.cleaned_data['start_date'] - timedelta(days=1) if form.cleaned_data.get('start_date') else timezone.localdate()
+                    if existing.end_date and existing.start_date and existing.end_date < existing.start_date:
+                        existing.end_date = existing.start_date
+                    existing.save(update_fields=['status', 'end_date', 'updated_at'])
+                self.object = form.save(commit=False)
+                self.object.status = TrainerAssignment.Status.ACTIVE
+                self.object.save()
+        except Exception as exc:
+            form.add_error(None, str(exc))
+            return self.form_invalid(form)
+        messages.success(self.request, f'Trainer {self.object.trainer.full_name} assigned to {self.object.member.full_name}.')
+        if self.trainer:
+            return redirect('gym:trainer_detail', pk=self.trainer.pk)
+        return redirect('gym:member_detail', pk=self.object.member.pk)
+
+    def form_invalid(self, form):
+        messages.error(self.request, 'Please correct the errors below.')
+        return super().form_invalid(form)
+
+
+class TrainerAssignmentEndView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        assignment = get_object_or_404(TrainerAssignment, pk=pk)
+        if assignment.status == TrainerAssignment.Status.ACTIVE:
+            assignment.status = TrainerAssignment.Status.COMPLETED
+            assignment.end_date = timezone.localdate()
+            assignment.save(update_fields=['status', 'end_date', 'updated_at'])
+            messages.success(request, 'Trainer assignment ended.')
+        else:
+            messages.info(request, 'Assignment is already not active.')
+        return redirect(request.POST.get('next') or reverse('gym:trainer_detail', kwargs={'pk': assignment.trainer_id}))
+
+
+class TrainerAvailabilityManageView(LoginRequiredMixin, View):
+    template_name = 'gym/trainer_availability.html'
+
+    def get(self, request, trainer_pk):
+        trainer = get_object_or_404(Trainer, pk=trainer_pk)
+        form = TrainerAvailabilityForm()
+        availabilities = trainer.availabilities.all().order_by('day_of_week', 'start_time')
+        return self._render(request, trainer, form, availabilities)
+
+    def post(self, request, trainer_pk):
+        trainer = get_object_or_404(Trainer, pk=trainer_pk)
+        form = TrainerAvailabilityForm(request.POST)
+        if form.is_valid():
+            slot = form.save(commit=False)
+            slot.trainer = trainer
+            try:
+                slot.save()
+                messages.success(request, 'Availability slot added.')
+                return redirect('gym:trainer_availability', trainer_pk=trainer.pk)
+            except Exception as exc:
+                form.add_error(None, str(exc))
+        messages.error(request, 'Please correct the errors below.')
+        availabilities = trainer.availabilities.all().order_by('day_of_week', 'start_time')
+        return self._render(request, trainer, form, availabilities)
+
+    def _render(self, request, trainer, form, availabilities):
+        from django.shortcuts import render
+        return render(request, self.template_name, {'trainer': trainer, 'form': form, 'availabilities': availabilities})
+
+
+class TrainerAvailabilityDeleteView(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        slot = get_object_or_404(TrainerAvailability, pk=pk)
+        trainer_pk = slot.trainer_id
+        slot.delete()
+        messages.success(request, 'Availability slot removed.')
+        return redirect(request.POST.get('next') or reverse('gym:trainer_availability', kwargs={'trainer_pk': trainer_pk}))
+
+
+class TrainerDashboardView(LoginRequiredMixin, View):
+    template_name = 'gym/trainer_dashboard.html'
+
+    def get(self, request):
+        total = Trainer.objects.count()
+        active = Trainer.objects.filter(status=Trainer.Status.ACTIVE).count()
+        inactive = Trainer.objects.filter(status=Trainer.Status.INACTIVE).count()
+        members_with_trainers = TrainerAssignment.objects.filter(status=TrainerAssignment.Status.ACTIVE).values('member').distinct().count()
+        recent_assignments = TrainerAssignment.objects.select_related('trainer', 'member').order_by('-created_at')[:10]
+        top_trainers = Trainer.objects.annotate(
+            active_count=Count('assignments__member', filter=Q(assignments__status=TrainerAssignment.Status.ACTIVE), distinct=True)
+        ).order_by('-active_count', 'full_name')[:10]
+        return render(request, self.template_name, {
+            'total_trainers': total,
+            'active_trainers': active,
+            'inactive_trainers': inactive,
+            'members_with_trainers': members_with_trainers,
+            'recent_assignments': recent_assignments,
+            'top_trainers': top_trainers,
+        })

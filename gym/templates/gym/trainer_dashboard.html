@@ -1,0 +1,58 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Trainer Dashboard | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Management{% endblock %}
+{% block page_title %}Trainer Dashboard{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:trainer_list' %}" class="btn btn-secondary">All Trainers</a>
+<a href="{% url 'gym:trainer_create' %}" class="btn btn-primary">+ Add Trainer</a>
+{% endblock %}
+
+{% block content %}
+<section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+  <div class="stat-card"><div class="stat-label">Total Trainers</div><div class="stat-value">{{ total_trainers }}</div></div>
+  <div class="stat-card"><div class="stat-label">Active Trainers</div><div class="stat-value success">{{ active_trainers }}</div></div>
+  <div class="stat-card"><div class="stat-label">Inactive Trainers</div><div class="stat-value muted">{{ inactive_trainers }}</div></div>
+  <div class="stat-card"><div class="stat-label">Members With Assigned Trainers</div><div class="stat-value">{{ members_with_trainers }}</div></div>
+</section>
+
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Recent Trainer Assignments</h2><p class="card-subtitle">Latest trainer-member assignment activity.</p></div></div>
+    {% if recent_assignments %}
+    <div class="table-wrap"><table><thead><tr><th>Trainer</th><th>Member</th><th>Start Date</th><th>Status</th></tr></thead><tbody>
+      {% for a in recent_assignments %}
+      <tr>
+        <td><a class="table-link" href="{% url 'gym:trainer_detail' a.trainer.pk %}">{{ a.trainer.trainer_id }} - {{ a.trainer.full_name }}</a></td>
+        <td><a class="table-link" href="{% url 'gym:member_detail' a.member.pk %}">{{ a.member.member_id }} - {{ a.member.full_name }}</a></td>
+        <td>{{ a.start_date|date:"M d, Y" }}</td>
+        <td><span class="badge {% if a.status == 'active' %}badge-active{% elif a.status == 'completed' %}badge-inactive{% else %}badge-cancelled{% endif %}">{{ a.get_status_display }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state"><p class="muted">No assignments yet.</p></div>{% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Trainers With Most Assigned Members</h2><p class="card-subtitle">Active assignment counts by trainer.</p></div></div>
+    {% if top_trainers %}
+    <div class="table-wrap"><table><thead><tr><th>Trainer</th><th>Specialization</th><th>Status</th><th>Active Assigned Members</th></tr></thead><tbody>
+      {% for t in top_trainers %}
+      <tr>
+        <td><a class="table-link" href="{% url 'gym:trainer_detail' t.pk %}">{{ t.trainer_id }} - {{ t.full_name }}</a></td>
+        <td>{{ t.specialization }}</td>
+        <td><span class="badge badge-{{ t.status }}">{{ t.get_status_display }}</span></td>
+        <td>{{ t.active_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% else %}<div class="empty-state"><p class="muted">No trainers found.</p></div>{% endif %}
+  </section>
+</div>
+
+<style>
+@media (max-width: 1100px) { .stats-grid[style*="repeat(4"] { grid-template-columns: repeat(2, minmax(0,1fr)) !important; } }
+@media (max-width: 640px) { .stats-grid[style*="repeat(4"] { grid-template-columns: 1fr !important; } }
+</style>
+{% endblock %}

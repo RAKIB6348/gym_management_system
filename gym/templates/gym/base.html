@@ -41,6 +41,10 @@
           <span class="nav-icon">●</span>
           <span>Dashboard</span>
         </a>
+        <a href="{% url 'gym:trainer_list' %}" class="nav-item {% if 'trainer' in request.resolver_match.url_name %}active{% endif %}">
+          <span class="nav-icon">●</span>
+          <span>Trainers</span>
+        </a>
       </nav>
       <div class="sidebar-footer">
         {% if request.user.is_authenticated %}

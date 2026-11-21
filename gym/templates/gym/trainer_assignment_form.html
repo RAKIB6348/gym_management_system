@@ -1,0 +1,77 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Assign Trainer | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Assignment{% endblock %}
+{% block page_title %}{% if member %}Change Trainer{% else %}Assign Member{% endif %}{% endblock %}
+
+{% block topbar_actions %}
+{% if trainer %}<a href="{% url 'gym:trainer_detail' trainer.pk %}" class="btn btn-secondary">Back to Trainer</a>{% endif %}
+{% if member %}<a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Back to Member</a>{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">{% if member %}Assign/Change Trainer for {{ member.full_name }}{% else %}Assign Member to {{ trainer.full_name }}{% endif %}</h2>
+      <p class="card-subtitle">A member can have only one active personal trainer assignment at a time. Reassigning ends the previous active assignment.</p>
+    </div>
+  </div>
+  <div class="card-body">
+    {% if current_assignment %}
+    <div class="alert alert-warning" style="margin-bottom:20px;">
+      Current active assignment: <strong>{{ current_assignment.trainer.full_name }}</strong> (since {{ current_assignment.start_date|date:"M d, Y" }}). Saving a new assignment will complete the previous one and preserve history.
+    </div>
+    {% endif %}
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="alert alert-error" style="margin-bottom:20px;">{{ form.non_field_errors }}</div>{% endif %}
+
+      {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
+
+      <div class="form-grid">
+        <div class="form-group {% if form.trainer.errors %}field-errors{% endif %}">
+          <label class="form-label">Trainer *</label>
+          {% if trainer %}
+            <input type="text" class="form-control" value="{{ trainer.trainer_id }} - {{ trainer.full_name }}" disabled>
+          {% else %}
+            {{ form.trainer }}
+          {% endif %}
+          {% for e in form.trainer.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.member.errors %}field-errors{% endif %}">
+          <label class="form-label">Member *</label>
+          {% if member %}
+            <input type="text" class="form-control" value="{{ member.member_id }} - {{ member.full_name }}" disabled>
+          {% else %}
+            {{ form.member }}
+          {% endif %}
+          {% for e in form.member.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.start_date.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.start_date.id_for_label }}">Start Date *</label>
+          {{ form.start_date }}
+          {% for e in form.start_date.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+        </div>
+
+        <div class="form-group {% if form.end_date.errors %}field-errors{% endif %}">
+          <label class="form-label" for="{{ form.end_date.id_for_label }}">End Date (optional)</label>
+          {{ form.end_date }}
+          <div class="form-help">Leave blank for an open active assignment.</div>
+          {% for e in form.end_date.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+        </div>
+      </div>
+
+      <div class="form-actions">
+        {% if trainer %}<a href="{% url 'gym:trainer_detail' trainer.pk %}" class="btn btn-secondary">Cancel</a>
+        {% elif member %}<a href="{% url 'gym:member_detail' member.pk %}" class="btn btn-secondary">Cancel</a>
+        {% else %}<a href="{% url 'gym:trainer_list' %}" class="btn btn-secondary">Cancel</a>{% endif %}
+        <button type="submit" class="btn btn-primary">Confirm Assignment</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

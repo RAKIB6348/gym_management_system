@@ -179,6 +179,47 @@
     <section class="card">
       <div class="card-header">
         <div>
+          <h2 class="card-title">Trainer</h2>
+          <p class="card-subtitle">Current personal trainer assignment and history.</p>
+        </div>
+        <div class="section-actions">
+          <a href="{% url 'gym:member_assign_trainer' member.pk %}" class="btn btn-secondary btn-sm">{% if current_trainer_assignment %}Change Trainer{% else %}Assign Trainer{% endif %}</a>
+        </div>
+      </div>
+      <div class="card-body">
+        {% if current_trainer_assignment %}
+        <div class="detail-grid" style="margin-bottom: 24px;">
+          <div class="detail-item"><div class="meta-label">Current Trainer</div><div class="meta-value"><a class="table-link" href="{% url 'gym:trainer_detail' current_trainer_assignment.trainer.pk %}">{{ current_trainer_assignment.trainer.full_name }}</a></div></div>
+          <div class="detail-item"><div class="meta-label">Trainer Specialization</div><div class="meta-value">{{ current_trainer_assignment.trainer.specialization }}</div></div>
+          <div class="detail-item"><div class="meta-label">Assignment Start Date</div><div class="meta-value">{{ current_trainer_assignment.start_date|date:"F d, Y" }}</div></div>
+          <div class="detail-item"><div class="meta-label">Assignment Status</div><div class="meta-value"><span class="badge badge-active">Active</span></div></div>
+        </div>
+        {% else %}
+        <p class="muted" style="margin-bottom: 20px;">No active trainer assigned.</p>
+        {% endif %}
+
+        <h3 style="margin: 0 0 12px; font-size: 1rem;">Previous Trainer History</h3>
+        {% if trainer_assignments %}
+        <div class="table-wrap"><table><thead><tr><th>Trainer</th><th>Specialization</th><th>Start</th><th>End</th><th>Status</th></tr></thead><tbody>
+          {% for a in trainer_assignments %}
+          <tr>
+            <td><a class="table-link" href="{% url 'gym:trainer_detail' a.trainer.pk %}">{{ a.trainer.full_name }}</a></td>
+            <td>{{ a.trainer.specialization }}</td>
+            <td>{{ a.start_date|date:"M d, Y" }}</td>
+            <td>{% if a.end_date %}{{ a.end_date|date:"M d, Y" }}{% else %}-{% endif %}</td>
+            <td><span class="badge {% if a.status == 'active' %}badge-active{% elif a.status == 'completed' %}badge-inactive{% else %}badge-cancelled{% endif %}">{{ a.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}
+        <p class="muted">No trainer assignment history.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div>
           <h2 class="card-title">Payments</h2>
           <p class="card-subtitle">Membership fees, payments, and receipts.</p>
         </div>

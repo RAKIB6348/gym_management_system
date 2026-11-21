@@ -1,0 +1,44 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{% if object %}Edit Trainer{% else %}Add Trainer{% endif %} | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Management{% endblock %}
+{% block page_title %}{% if object %}Edit Trainer{% else %}Add New Trainer{% endif %}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% if object %}{% url 'gym:trainer_detail' object.pk %}{% else %}{% url 'gym:trainer_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+{% endblock %}
+
+{% block content %}
+<section class="card">
+  <div class="card-header">
+    <div>
+      <h2 class="card-title">{% if object %}Update trainer details{% else %}Trainer registration{% endif %}</h2>
+      <p class="card-subtitle">{% if object %}Trainer ID: {{ object.trainer_id }}{% else %}Trainer ID will be generated automatically.{% endif %}</p>
+    </div>
+  </div>
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="alert alert-error" style="margin-bottom:20px;">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="form-grid">
+        <div class="form-group {% if form.full_name.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.full_name.id_for_label }}">Full Name *</label>{{ form.full_name }}{% for e in form.full_name.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.phone.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.phone.id_for_label }}">Phone *</label>{{ form.phone }}{% for e in form.phone.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.email.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.email.id_for_label }}">Email</label>{{ form.email }}{% for e in form.email.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.gender.errors %}field-errors{% endif %}"><span class="form-label">Gender *</span><div class="radio-group">{{ form.gender }}</div>{% for e in form.gender.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.date_of_birth.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.date_of_birth.id_for_label }}">Date of Birth</label>{{ form.date_of_birth }}{% for e in form.date_of_birth.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.joining_date.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.joining_date.id_for_label }}">Joining Date *</label>{{ form.joining_date }}{% for e in form.joining_date.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.specialization.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.specialization.id_for_label }}">Specialization *</label>{{ form.specialization }}{% for e in form.specialization.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.experience_years.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.experience_years.id_for_label }}">Experience (years) *</label>{{ form.experience_years }}{% for e in form.experience_years.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.status.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.status.id_for_label }}">Status *</label>{{ form.status }}{% for e in form.status.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group {% if form.photo.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.photo.id_for_label }}">Photo</label>{{ form.photo }}{% for e in form.photo.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group full {% if form.address.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.address.id_for_label }}">Address</label>{{ form.address }}{% for e in form.address.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+        <div class="form-group full {% if form.qualification.errors %}field-errors{% endif %}"><label class="form-label" for="{{ form.qualification.id_for_label }}">Qualification</label>{{ form.qualification }}{% for e in form.qualification.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}</div>
+      </div>
+      <div class="form-actions">
+        <a href="{% if object %}{% url 'gym:trainer_detail' object.pk %}{% else %}{% url 'gym:trainer_list' %}{% endif %}" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary">{% if object %}Save Changes{% else %}Create Trainer{% endif %}</button>
+      </div>
+    </form>
+  </div>
+</section>
+{% endblock %}

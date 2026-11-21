@@ -1,0 +1,109 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}{{ trainer.full_name }} | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Profile{% endblock %}
+{% block page_title %}{{ trainer.full_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:trainer_edit' trainer.pk %}" class="btn btn-secondary">Edit Trainer</a>
+{% if trainer.status == 'active' %}
+<a href="{% url 'gym:trainer_assign_member' trainer.pk %}" class="btn btn-primary">Assign Member</a>
+{% endif %}
+<a href="{% url 'gym:trainer_availability' trainer.pk %}" class="btn btn-secondary">Manage Availability</a>
+{% endblock %}
+
+{% block content %}
+<div class="profile-layout">
+  <aside class="card profile-card">
+    {% if trainer.photo %}<img src="{{ trainer.photo.url }}" alt="{{ trainer.full_name }}" class="avatar-lg">
+    {% else %}<div class="avatar-lg">{{ trainer.full_name|slice:":1"|upper }}</div>{% endif %}
+    <h2 class="profile-name">{{ trainer.full_name }}</h2>
+    <p class="profile-id">{{ trainer.trainer_id }}</p>
+    <span class="badge badge-{{ trainer.status }}">{{ trainer.get_status_display }}</span>
+    <div class="profile-meta">
+      <div class="meta-item"><div class="meta-label">Specialization</div><div class="meta-value">{{ trainer.specialization }}</div></div>
+      <div class="meta-item"><div class="meta-label">Experience</div><div class="meta-value">{{ trainer.experience_years }} year{{ trainer.experience_years|pluralize }}</div></div>
+      <div class="meta-item"><div class="meta-label">Phone</div><div class="meta-value">{{ trainer.phone }}</div></div>
+    </div>
+  </aside>
+
+  <div class="detail-sections">
+    <section class="card">
+      <div class="card-header"><div><h2 class="card-title">Trainer Information</h2><p class="card-subtitle">Contact and professional details.</p></div></div>
+      <div class="card-body">
+        <div class="detail-grid">
+          <div class="detail-item"><div class="meta-label">Full Name</div><div class="meta-value">{{ trainer.full_name }}</div></div>
+          <div class="detail-item"><div class="meta-label">Trainer ID</div><div class="meta-value">{{ trainer.trainer_id }}</div></div>
+          <div class="detail-item"><div class="meta-label">Email</div><div class="meta-value">{{ trainer.email|default:"Not provided" }}</div></div>
+          <div class="detail-item"><div class="meta-label">Gender</div><div class="meta-value">{{ trainer.get_gender_display }}</div></div>
+          <div class="detail-item"><div class="meta-label">Date of Birth</div><div class="meta-value">{% if trainer.date_of_birth %}{{ trainer.date_of_birth|date:"F d, Y" }}{% else %}Not provided{% endif %}</div></div>
+          <div class="detail-item"><div class="meta-label">Joining Date</div><div class="meta-value">{{ trainer.joining_date|date:"F d, Y" }}</div></div>
+          <div class="detail-item full"><div class="meta-label">Address</div><div class="meta-value">{{ trainer.address|default:"Not provided"|linebreaksbr }}</div></div>
+          <div class="detail-item full"><div class="meta-label">Qualification</div><div class="meta-value">{{ trainer.qualification|default:"Not provided"|linebreaksbr }}</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div><h2 class="card-title">Weekly Availability</h2><p class="card-subtitle">Configured availability for future class scheduling.</p></div>
+        <a href="{% url 'gym:trainer_availability' trainer.pk %}" class="btn btn-secondary btn-sm">Manage Availability</a>
+      </div>
+      <div class="card-body">
+        {% if availabilities %}
+        <div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Available</th></tr></thead><tbody>
+          {% for slot in availabilities %}
+          <tr><td>{{ slot.get_day_of_week_display }}</td><td>{{ slot.start_time|time:"g:i A" }}</td><td>{{ slot.end_time|time:"g:i A" }}</td><td>{% if slot.is_available %}<span class="badge badge-active">Yes</span>{% else %}<span class="badge badge-inactive">No</span>{% endif %}</td></tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}<p class="muted">No availability slots configured.</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <div><h2 class="card-title">Assigned Members</h2><p class="card-subtitle">Currently active trainer assignments.</p></div>
+        {% if trainer.status == 'active' %}<a href="{% url 'gym:trainer_assign_member' trainer.pk %}" class="btn btn-secondary btn-sm">Assign Member</a>{% endif %}
+      </div>
+      <div class="card-body">
+        {% if active_assignments %}
+        <div class="table-wrap"><table><thead><tr><th>Member</th><th>Start Date</th><th>Status</th><th>Action</th></tr></thead><tbody>
+          {% for a in active_assignments %}
+          <tr>
+            <td><a class="table-link" href="{% url 'gym:member_detail' a.member.pk %}">{{ a.member.member_id }} - {{ a.member.full_name }}</a></td>
+            <td>{{ a.start_date|date:"M d, Y" }}</td>
+            <td><span class="badge badge-active">Active</span></td>
+            <td>
+              <form method="post" action="{% url 'gym:trainer_assignment_end' a.pk %}" class="inline-form" onsubmit="return confirm('End this assignment?');">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'gym:trainer_detail' trainer.pk %}">
+                <button type="submit" class="btn btn-danger btn-sm">End</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}<p class="muted">No active member assignments.</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><div><h2 class="card-title">Assignment History</h2><p class="card-subtitle">Previous and current assignment records.</p></div></div>
+      <div class="card-body">
+        {% if assignment_history %}
+        <div class="table-wrap"><table><thead><tr><th>Member</th><th>Start</th><th>End</th><th>Status</th></tr></thead><tbody>
+          {% for a in assignment_history %}
+          <tr>
+            <td><a class="table-link" href="{% url 'gym:member_detail' a.member.pk %}">{{ a.member.member_id }} - {{ a.member.full_name }}</a></td>
+            <td>{{ a.start_date|date:"M d, Y" }}</td>
+            <td>{% if a.end_date %}{{ a.end_date|date:"M d, Y" }}{% else %}-{% endif %}</td>
+            <td><span class="badge {% if a.status == 'active' %}badge-active{% elif a.status == 'completed' %}badge-inactive{% else %}badge-cancelled{% endif %}">{{ a.get_status_display }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}<p class="muted">No assignment history.</p>{% endif %}
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

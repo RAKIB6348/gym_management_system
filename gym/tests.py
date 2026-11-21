@@ -569,3 +569,172 @@ class PaymentConcurrencyTests(TransactionTestCase):
         ).aggregate(total=Coalesce(Sum('amount'), Decimal('0.00')))['total']
         self.assertLessEqual(total_paid, Decimal('1000.00'))
         self.assertTrue(MembershipPayment.objects.filter(subscription=self.subscription, status='completed').count() >= 1)
+
+from .models import Trainer, TrainerAssignment, TrainerAvailability
+
+
+class TrainerFeatureTests(TestCase):
+    def setUp(self):
+        self.staff = User.objects.create_user(username='trainerstaff', password='pass12345', is_staff=True)
+        self.client.force_login(self.staff)
+        self.member = Member.objects.create(
+            full_name='Member One', mobile_number='+15550001001', gender='male',
+            joining_date=date(2026, 1, 1), status='active'
+        )
+        self.member2 = Member.objects.create(
+            full_name='Member Two', mobile_number='+15550001002', gender='female',
+            joining_date=date(2026, 1, 1), status='active'
+        )
+
+    def create_trainer(self, **overrides):
+        data = {
+            'full_name': 'Trainer One', 'phone': '+15559990001', 'email': 't1@example.com',
+            'gender': 'male', 'date_of_birth': '1990-01-01', 'address': 'Gym St',
+            'specialization': 'Strength', 'experience_years': 5, 'qualification': 'Cert',
+            'joining_date': '2026-01-01', 'status': 'active',
+        }
+        data.update(overrides)
+        return Trainer.objects.create(**data)
+
+    def test_create_trainer(self):
+        response = self.client.post(reverse('gym:trainer_create'), {
+            'full_name': 'New Trainer', 'phone': '+15551112222', 'email': 'new@t.com',
+            'gender': 'female', 'date_of_birth': '1992-02-02', 'address': 'Addr',
+            'specialization': 'Yoga', 'experience_years': 3, 'qualification': 'RYT',
+            'joining_date': '2026-11-21', 'status': 'active',
+        })
+        self.assertEqual(response.status_code, 302)
+        trainer = Trainer.objects.get(full_name='New Trainer')
+        self.assertTrue(trainer.trainer_id.startswith('TR-'))
+        self.assertEqual(trainer.specialization, 'Yoga')
+
+    def test_edit_trainer(self):
+        trainer = self.create_trainer(full_name='Old')
+        response = self.client.post(reverse('gym:trainer_edit', args=[trainer.pk]), {
+            'full_name': 'Updated Trainer', 'phone': '+15551112222', 'email': 'u@t.com',
+            'gender': 'male', 'date_of_birth': '1990-01-01', 'address': 'New Addr',
+            'specialization': 'Cardio', 'experience_years': 7, 'qualification': 'New Cert',
+            'joining_date': '2026-01-01', 'status': 'active',
+        })
+        self.assertEqual(response.status_code, 302)
+        trainer.refresh_from_db()
+        self.assertEqual(trainer.full_name, 'Updated Trainer')
+        self.assertEqual(trainer.specialization, 'Cardio')
+
+    def test_activate_deactivate_trainer(self):
+        trainer = self.create_trainer(status='active')
+        r = self.client.post(reverse('gym:trainer_toggle_status', args=[trainer.pk]), {'next': reverse('gym:trainer_list')})
+        self.assertEqual(r.status_code, 302)
+        trainer.refresh_from_db()
+        self.assertEqual(trainer.status, 'inactive')
+        self.client.post(reverse('gym:trainer_toggle_status', args=[trainer.pk]), {'next': reverse('gym:trainer_list')})
+        trainer.refresh_from_db()
+        self.assertEqual(trainer.status, 'active')
+
+    def test_search_and_filter_trainers(self):
+        self.create_trainer(full_name='Alice Strength', phone='+111', specialization='Strength')
+        self.create_trainer(full_name='Bob Yoga', phone='+222', specialization='Yoga', status='inactive')
+        r = self.client.get(reverse('gym:trainer_list'), {'q': 'Alice'})
+        self.assertContains(r, 'Alice Strength')
+        self.assertNotContains(r, 'Bob Yoga')
+        r = self.client.get(reverse('gym:trainer_list'), {'specialization': 'Yoga'})
+        self.assertContains(r, 'Bob Yoga')
+        self.assertNotContains(r, 'Alice Strength')
+        r = self.client.get(reverse('gym:trainer_list'), {'status': 'inactive'})
+        self.assertContains(r, 'Bob Yoga')
+        self.assertNotContains(r, 'Alice Strength')
+
+    def test_assign_trainer_to_member(self):
+        trainer = self.create_trainer()
+        response = self.client.post(reverse('gym:trainer_assign_member', args=[trainer.pk]), {
+            'trainer': trainer.pk, 'member': self.member.pk, 'start_date': '2026-11-21', 'end_date': ''
+        })
+        self.assertEqual(response.status_code, 302)
+        a = TrainerAssignment.objects.get(member=self.member)
+        self.assertEqual(a.trainer, trainer)
+        self.assertEqual(a.status, TrainerAssignment.Status.ACTIVE)
+
+    def test_prevent_duplicate_active_assignments(self):
+        trainer = self.create_trainer()
+        trainer2 = self.create_trainer(full_name='T2', phone='+15550002')
+        TrainerAssignment.objects.create(trainer=trainer, member=self.member, start_date=date(2026,11,1), status='active')
+        # direct model create should fail
+        with self.assertRaises(Exception):
+            TrainerAssignment.objects.create(trainer=trainer2, member=self.member, start_date=date(2026,11,2), status='active')
+
+    def test_reassign_trainer(self):
+        trainer1 = self.create_trainer(full_name='T1', phone='+1')
+        trainer2 = self.create_trainer(full_name='T2', phone='+2')
+        TrainerAssignment.objects.create(trainer=trainer1, member=self.member, start_date=date(2026,11,1), status='active')
+        response = self.client.post(reverse('gym:member_assign_trainer', args=[self.member.pk]), {
+            'trainer': trainer2.pk, 'member': self.member.pk, 'start_date': '2026-11-21', 'end_date': ''
+        })
+        self.assertEqual(response.status_code, 302)
+        assignments = TrainerAssignment.objects.filter(member=self.member).order_by('start_date')
+        self.assertEqual(assignments.count(), 2)
+        self.assertEqual(assignments[0].status, TrainerAssignment.Status.COMPLETED)
+        self.assertEqual(assignments[1].status, TrainerAssignment.Status.ACTIVE)
+        self.assertEqual(assignments[1].trainer, trainer2)
+
+    def test_verify_assignment_history(self):
+        trainer1 = self.create_trainer(full_name='T1', phone='+1')
+        trainer2 = self.create_trainer(full_name='T2', phone='+2')
+        TrainerAssignment.objects.create(trainer=trainer1, member=self.member, start_date=date(2026,10,1), end_date=date(2026,10,31), status='completed')
+        TrainerAssignment.objects.create(trainer=trainer2, member=self.member, start_date=date(2026,11,1), status='active')
+        r = self.client.get(reverse('gym:member_detail', args=[self.member.pk]))
+        self.assertContains(r, 'Previous Trainer History')
+        self.assertContains(r, 'T1')
+        self.assertContains(r, 'T2')
+
+    def test_configure_trainer_availability(self):
+        trainer = self.create_trainer()
+        response = self.client.post(reverse('gym:trainer_availability', args=[trainer.pk]), {
+            'day_of_week': '0', 'start_time': '09:00', 'end_time': '11:00', 'is_available': 'on'
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TrainerAvailability.objects.filter(trainer=trainer).count(), 1)
+        slot = TrainerAvailability.objects.first()
+        self.assertEqual(slot.day_of_week, 0)
+
+    def test_prevent_overlapping_availability(self):
+        trainer = self.create_trainer()
+        TrainerAvailability.objects.create(trainer=trainer, day_of_week=0, start_time='09:00', end_time='11:00', is_available=True)
+        response = self.client.post(reverse('gym:trainer_availability', args=[trainer.pk]), {
+            'day_of_week': '0', 'start_time': '10:00', 'end_time': '12:00', 'is_available': 'on'
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(TrainerAvailability.objects.filter(trainer=trainer).count(), 1)
+
+    def test_verify_trainer_dashboard(self):
+        t1 = self.create_trainer(full_name='T1', phone='+1')
+        self.create_trainer(full_name='T2', phone='+2', status='inactive')
+        TrainerAssignment.objects.create(trainer=t1, member=self.member, start_date=date(2026,11,1), status='active')
+        r = self.client.get(reverse('gym:trainer_dashboard'))
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.context['total_trainers'], 2)
+        self.assertEqual(r.context['active_trainers'], 1)
+        self.assertEqual(r.context['inactive_trainers'], 1)
+        self.assertEqual(r.context['members_with_trainers'], 1)
+
+    def test_verify_member_profile_integration(self):
+        trainer = self.create_trainer(full_name='Coach', specialization='Cardio')
+        TrainerAssignment.objects.create(trainer=trainer, member=self.member, start_date=date(2026,11,21), status='active')
+        r = self.client.get(reverse('gym:member_detail', args=[self.member.pk]))
+        self.assertContains(r, 'Current Trainer')
+        self.assertContains(r, 'Coach')
+        self.assertContains(r, 'Cardio')
+        self.assertContains(r, 'Change Trainer')
+
+    def test_verify_authentication_and_permissions(self):
+        self.client.logout()
+        trainer = self.create_trainer()
+        urls = [
+            reverse('gym:trainer_list'),
+            reverse('gym:trainer_create'),
+            reverse('gym:trainer_dashboard'),
+            reverse('gym:trainer_detail', args=[trainer.pk]),
+        ]
+        for url in urls:
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 302)
+            self.assertIn('/accounts/login/', response.url)

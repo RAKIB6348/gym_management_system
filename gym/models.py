@@ -339,3 +339,156 @@ class MembershipPayment(models.Model):
                     self.payment_reference = None
             raise last_error
         super().save(*args, **kwargs)
+
+
+class Trainer(models.Model):
+    class Gender(models.TextChoices):
+        MALE = 'male', 'Male'
+        FEMALE = 'female', 'Female'
+        OTHER = 'other', 'Other'
+
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        INACTIVE = 'inactive', 'Inactive'
+
+    trainer_id = models.CharField(max_length=20, unique=True, editable=False)
+    full_name = models.CharField(max_length=150)
+    photo = models.ImageField(upload_to='trainers/photos/', blank=True, null=True)
+    phone = models.CharField(max_length=20)
+    email = models.EmailField(blank=True)
+    gender = models.CharField(max_length=10, choices=Gender.choices)
+    date_of_birth = models.DateField(blank=True, null=True)
+    address = models.TextField(blank=True)
+    specialization = models.CharField(max_length=120)
+    experience_years = models.PositiveIntegerField(default=0)
+    qualification = models.TextField(blank=True)
+    joining_date = models.DateField(default=timezone.localdate)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.trainer_id} - {self.full_name}'
+
+    @classmethod
+    def generate_trainer_id(cls):
+        prefix = 'TR-'
+        last = cls.objects.filter(trainer_id__startswith=prefix).order_by('-trainer_id').first()
+        if last:
+            try:
+                last_number = int(last.trainer_id.replace(prefix, ''))
+            except ValueError:
+                last_number = 0
+        else:
+            last_number = 0
+        return f'{prefix}{last_number + 1:04d}'
+
+    def save(self, *args, **kwargs):
+        if not self.trainer_id:
+            last_error = None
+            for _ in range(20):
+                self.trainer_id = self.generate_trainer_id()
+                try:
+                    with transaction.atomic():
+                        super().save(*args, **kwargs)
+                    return
+                except IntegrityError as exc:
+                    last_error = exc
+                    self.trainer_id = None
+            raise last_error
+        super().save(*args, **kwargs)
+
+
+class TrainerAssignment(models.Model):
+    class Status(models.TextChoices):
+        ACTIVE = 'active', 'Active'
+        COMPLETED = 'completed', 'Completed'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    trainer = models.ForeignKey(Trainer, on_delete=models.PROTECT, related_name='assignments')
+    member = models.ForeignKey(Member, on_delete=models.PROTECT, related_name='trainer_assignments')
+    start_date = models.DateField(default=timezone.localdate)
+    end_date = models.DateField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-start_date', '-created_at']
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['member', 'status']),
+            models.Index(fields=['trainer', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.member.member_id} -> {self.trainer.trainer_id} ({self.status})'
+
+    def clean(self):
+        errors = {}
+        if self.start_date and self.end_date and self.end_date < self.start_date:
+            errors['end_date'] = 'End date cannot be before start date.'
+        if self.trainer_id and self.trainer.status != Trainer.Status.ACTIVE and self.status == self.Status.ACTIVE and not self.pk:
+            errors['trainer'] = 'Inactive trainers cannot receive new assignments.'
+        if errors:
+            raise ValidationError(errors)
+
+        if self.status == self.Status.ACTIVE and self.member_id and not getattr(self, '_allow_reassign', False):
+            qs = TrainerAssignment.objects.filter(member_id=self.member_id, status=self.Status.ACTIVE)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            if qs.exists():
+                raise ValidationError('This member already has an active trainer assignment.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class TrainerAvailability(models.Model):
+    class DayOfWeek(models.IntegerChoices):
+        MONDAY = 0, 'Monday'
+        TUESDAY = 1, 'Tuesday'
+        WEDNESDAY = 2, 'Wednesday'
+        THURSDAY = 3, 'Thursday'
+        FRIDAY = 4, 'Friday'
+        SATURDAY = 5, 'Saturday'
+        SUNDAY = 6, 'Sunday'
+
+    trainer = models.ForeignKey(Trainer, on_delete=models.CASCADE, related_name='availabilities')
+    day_of_week = models.IntegerField(choices=DayOfWeek.choices)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    is_available = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['day_of_week', 'start_time']
+        indexes = [models.Index(fields=['trainer', 'day_of_week'])]
+
+    def __str__(self):
+        return f'{self.trainer.trainer_id} {self.get_day_of_week_display()} {self.start_time}-{self.end_time}'
+
+    def clean(self):
+        errors = {}
+        if self.start_time and self.end_time and self.end_time <= self.start_time:
+            errors['end_time'] = 'End time must be after start time.'
+        if errors:
+            raise ValidationError(errors)
+
+        if self.trainer_id and self.start_time and self.end_time:
+            qs = TrainerAvailability.objects.filter(trainer_id=self.trainer_id, day_of_week=self.day_of_week)
+            if self.pk:
+                qs = qs.exclude(pk=self.pk)
+            # overlap: start < other_end and end > other_start
+            qs = qs.filter(start_time__lt=self.end_time, end_time__gt=self.start_time)
+            if qs.exists():
+                raise ValidationError('This availability slot overlaps an existing slot for the same trainer.')
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)

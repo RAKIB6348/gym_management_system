@@ -1,0 +1,79 @@
+{% extends 'gym/base.html' %}
+
+{% block title %}Trainer Availability | Gym Management{% endblock %}
+{% block eyebrow %}Trainer Availability{% endblock %}
+{% block page_title %}{{ trainer.full_name }}{% endblock %}
+
+{% block topbar_actions %}
+<a href="{% url 'gym:trainer_detail' trainer.pk %}" class="btn btn-secondary">Back to Trainer</a>
+{% endblock %}
+
+{% block content %}
+<div class="detail-sections">
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <h2 class="card-title">Add Availability Slot</h2>
+        <p class="card-subtitle">Configure weekly availability for {{ trainer.trainer_id }} - {{ trainer.full_name }}.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-error" style="margin-bottom:20px;">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="form-grid">
+          <div class="form-group {% if form.day_of_week.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.day_of_week.id_for_label }}">Day of Week *</label>
+            {{ form.day_of_week }}
+            {% for e in form.day_of_week.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+          </div>
+          <div class="form-group {% if form.start_time.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.start_time.id_for_label }}">Start Time *</label>
+            {{ form.start_time }}
+            {% for e in form.start_time.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+          </div>
+          <div class="form-group {% if form.end_time.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.end_time.id_for_label }}">End Time *</label>
+            {{ form.end_time }}
+            {% for e in form.end_time.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+          </div>
+          <div class="form-group {% if form.is_available.errors %}field-errors{% endif %}">
+            <label class="form-label" for="{{ form.is_available.id_for_label }}">Available</label>
+            <div style="padding:10px 0;"><label style="display:flex;gap:10px;align-items:center;font-weight:500;">{{ form.is_available }} Trainer is available during this slot</label></div>
+            {% for e in form.is_available.errors %}<ul class="errorlist"><li>{{ e }}</li></ul>{% endfor %}
+          </div>
+        </div>
+        <div class="form-actions">
+          <a href="{% url 'gym:trainer_detail' trainer.pk %}" class="btn btn-secondary">Cancel</a>
+          <button type="submit" class="btn btn-primary">Add Slot</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><h2 class="card-title">Weekly Schedule</h2><p class="card-subtitle">Existing availability slots.</p></div></div>
+    <div class="card-body">
+      {% if availabilities %}
+      <div class="table-wrap"><table><thead><tr><th>Day</th><th>Start</th><th>End</th><th>Available</th><th>Action</th></tr></thead><tbody>
+        {% for slot in availabilities %}
+        <tr>
+          <td>{{ slot.get_day_of_week_display }}</td>
+          <td>{{ slot.start_time|time:"g:i A" }}</td>
+          <td>{{ slot.end_time|time:"g:i A" }}</td>
+          <td>{% if slot.is_available %}<span class="badge badge-active">Yes</span>{% else %}<span class="badge badge-inactive">No</span>{% endif %}</td>
+          <td>
+            <form method="post" action="{% url 'gym:trainer_availability_delete' slot.pk %}" class="inline-form" onsubmit="return confirm('Remove this availability slot?');">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{% url 'gym:trainer_availability' trainer.pk %}">
+              <button type="submit" class="btn btn-danger btn-sm">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody></table></div>
+      {% else %}<p class="muted">No availability slots configured yet.</p>{% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
