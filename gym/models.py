@@ -67,14 +67,11 @@ class Member(models.Model):
     @classmethod
     def generate_member_id(cls):
         prefix = 'GYM-'
-        last_member = cls.objects.filter(member_id__startswith=prefix).order_by('-member_id').first()
-        if last_member:
-            try:
-                last_number = int(last_member.member_id.replace(prefix, ''))
-            except ValueError:
-                last_number = 0
-        else:
-            last_number = 0
+        last_number = 0
+        for ref in cls.objects.filter(member_id__startswith=prefix).values_list('member_id', flat=True):
+            suffix = ref[len(prefix):]
+            if suffix.isdigit():
+                last_number = max(last_number, int(suffix))
         return f'{prefix}{last_number + 1:04d}'
 
     def save(self, *args, **kwargs):
@@ -305,14 +302,11 @@ class MembershipPayment(models.Model):
     @classmethod
     def generate_payment_reference(cls):
         prefix = 'PAY-'
-        last_payment = cls.objects.filter(payment_reference__startswith=prefix).order_by('-payment_reference').first()
-        if last_payment:
-            try:
-                last_number = int(last_payment.payment_reference.replace(prefix, ''))
-            except ValueError:
-                last_number = 0
-        else:
-            last_number = 0
+        last_number = 0
+        for ref in cls.objects.filter(payment_reference__startswith=prefix).values_list('payment_reference', flat=True):
+            suffix = ref[len(prefix):]
+            if suffix.isdigit():
+                last_number = max(last_number, int(suffix))
         return f'{prefix}{last_number + 1:04d}'
 
     def clean(self):
@@ -376,14 +370,11 @@ class Trainer(models.Model):
     @classmethod
     def generate_trainer_id(cls):
         prefix = 'TR-'
-        last = cls.objects.filter(trainer_id__startswith=prefix).order_by('-trainer_id').first()
-        if last:
-            try:
-                last_number = int(last.trainer_id.replace(prefix, ''))
-            except ValueError:
-                last_number = 0
-        else:
-            last_number = 0
+        last_number = 0
+        for ref in cls.objects.filter(trainer_id__startswith=prefix).values_list('trainer_id', flat=True):
+            suffix = ref[len(prefix):]
+            if suffix.isdigit():
+                last_number = max(last_number, int(suffix))
         return f'{prefix}{last_number + 1:04d}'
 
     def save(self, *args, **kwargs):

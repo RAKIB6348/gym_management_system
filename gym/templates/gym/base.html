@@ -21,38 +21,53 @@
         </div>
       </div>
       <nav class="sidebar-nav">
-        <a href="{% url 'gym:member_list' %}" class="nav-item {% if request.resolver_match.url_name == 'member_list' or request.resolver_match.url_name == 'member_detail' or request.resolver_match.url_name == 'member_create' or request.resolver_match.url_name == 'member_edit' or request.resolver_match.url_name == 'subscription_assign' or request.resolver_match.url_name == 'subscription_renew' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Members</span>
-        </a>
-        <a href="{% url 'gym:plan_list' %}" class="nav-item {% if 'plan' in request.resolver_match.url_name %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Plans</span>
-        </a>
-        <a href="{% url 'gym:subscription_list' %}" class="nav-item {% if request.resolver_match.url_name == 'subscription_list' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Subscriptions</span>
-        </a>
-        <a href="{% url 'gym:payment_list' %}" class="nav-item {% if request.resolver_match.url_name == 'payment_list' or request.resolver_match.url_name == 'payment_collect' or request.resolver_match.url_name == 'payment_receipt' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Payments</span>
-        </a>
-        <a href="{% url 'gym:business_dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'business_dashboard' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Dashboard</span>
-        </a>
-        <a href="{% url 'gym:reports_index' %}" class="nav-item {% if 'report' in request.resolver_match.url_name and request.resolver_match.url_name != 'business_dashboard' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Reports</span>
-        </a>
-        <a href="{% url 'gym:trainer_list' %}" class="nav-item {% if 'trainer' in request.resolver_match.url_name %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Trainers</span>
-        </a>
-        <a href="{% url 'gym:class_list' %}" class="nav-item {% if 'class' in request.resolver_match.url_name or request.resolver_match.url_name == 'weekly_schedule' %}active{% endif %}">
-          <span class="nav-icon">●</span>
-          <span>Classes</span>
-        </a>
+        <div class="nav-section">
+          <p class="nav-section-label">Overview</p>
+          <a href="{% url 'gym:business_dashboard' %}" class="nav-item {% if request.resolver_match.url_name == 'business_dashboard' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+            <span>Dashboard</span>
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <p class="nav-section-label">Membership</p>
+          <a href="{% url 'gym:member_list' %}" class="nav-item {% if request.resolver_match.url_name == 'member_list' or request.resolver_match.url_name == 'member_detail' or request.resolver_match.url_name == 'member_create' or request.resolver_match.url_name == 'member_edit' or request.resolver_match.url_name == 'subscription_assign' or request.resolver_match.url_name == 'subscription_renew' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+            <span>Members</span>
+          </a>
+          <a href="{% url 'gym:plan_list' %}" class="nav-item {% if 'plan' in request.resolver_match.url_name %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg></span>
+            <span>Plans</span>
+          </a>
+          <a href="{% url 'gym:subscription_list' %}" class="nav-item {% if request.resolver_match.url_name == 'subscription_list' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <span>Subscriptions</span>
+          </a>
+          <a href="{% url 'gym:payment_list' %}" class="nav-item {% if request.resolver_match.url_name == 'payment_list' or request.resolver_match.url_name == 'payment_collect' or request.resolver_match.url_name == 'payment_receipt' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg></span>
+            <span>Payments</span>
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <p class="nav-section-label">Gym Operations</p>
+          <a href="{% url 'gym:trainer_list' %}" class="nav-item {% if 'trainer' in request.resolver_match.url_name %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></span>
+            <span>Trainers</span>
+          </a>
+          <a href="{% url 'gym:class_list' %}" class="nav-item {% if 'class' in request.resolver_match.url_name or request.resolver_match.url_name == 'weekly_schedule' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span>
+            <span>Classes</span>
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <p class="nav-section-label">Analytics</p>
+          <a href="{% url 'gym:reports_index' %}" class="nav-item {% if 'report' in request.resolver_match.url_name and request.resolver_match.url_name != 'business_dashboard' %}active{% endif %}">
+            <span class="nav-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 16l4-4 3 3 5-7"/></svg></span>
+            <span>Reports</span>
+          </a>
+        </div>
       </nav>
       <div class="sidebar-footer">
         {% if request.user.is_authenticated %}
